@@ -8,383 +8,252 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #000; overflow: hidden; touch-action: none; }
-
-#container { position: fixed; inset: 0; }
-
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; touch-action:none; }
+#container { position:fixed; inset:0; }
 #vid {
-position: absolute; inset: 0;
-width: 100%; height: 100%;
-object-fit: cover;
-transform: scaleX(-1);
-z-index: 1;
+  position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; transform:scaleX(-1); z-index:1;
 }
-#trail-canvas, #live-canvas {
-position: absolute; inset: 0; width: 100%; height: 100%;
-pointer-events: none;
+#c {
+  position:absolute; inset:0; width:100%; height:100%;
+  pointer-events:none; z-index:2;
 }
-#trail-canvas { z-index: 2; }
-#live-canvas  { z-index: 3; }
-
 #start-screen {
-position: fixed; inset: 0; background: #000;
-display: flex; flex-direction: column;
-align-items: center; justify-content: center; gap: 14px; z-index: 20;
-font-family: ‘Courier New’, monospace;
+  position:fixed; inset:0; background:#000; z-index:20;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px;
+  font-family:'Courier New',monospace;
 }
 #start-screen h1 {
-font-size: clamp(2rem, 9vw, 4.5rem); font-weight: 400;
-letter-spacing: 0.25em; color: #fff; text-transform: uppercase;
-text-shadow: 0 0 80px rgba(100,200,255,0.5);
+  font-size:clamp(2rem,9vw,4.5rem); font-weight:400;
+  letter-spacing:0.25em; color:#fff; text-transform:uppercase;
+  text-shadow:0 0 80px rgba(100,200,255,0.5);
 }
 #start-screen p {
-font-size: 0.65rem; letter-spacing: 0.15em;
-color: rgba(255,255,255,0.28); text-align: center; line-height: 2;
+  font-size:0.65rem; letter-spacing:0.15em;
+  color:rgba(255,255,255,0.28); text-align:center; line-height:2;
 }
 #start-btn {
-font-family: ‘Courier New’, monospace; font-size: 0.7rem;
-letter-spacing: 0.3em; text-transform: uppercase;
-color: #000; background: #fff; border: none;
-padding: 14px 42px; cursor: pointer; border-radius: 2px; margin-top: 6px;
+  font-family:'Courier New',monospace; font-size:0.7rem;
+  letter-spacing:0.3em; text-transform:uppercase;
+  color:#000; background:#fff; border:none;
+  padding:14px 42px; cursor:pointer; border-radius:2px; margin-top:6px;
 }
 #fps {
-position: fixed; top: 16px; right: 20px; z-index: 10;
-font-family: ‘Courier New’, monospace; font-size: 0.55rem;
-letter-spacing: 0.15em; color: rgba(255,255,255,0.2);
-}
-#clear-btn {
-position: fixed; bottom: 20px; right: 20px; z-index: 10;
-font-family: ‘Courier New’, monospace; font-size: 0.55rem;
-letter-spacing: 0.2em; text-transform: uppercase;
-color: rgba(255,255,255,0.2); background: transparent;
-border: 1px solid rgba(255,255,255,0.1);
-padding: 8px 14px; cursor: pointer; border-radius: 2px;
+  position:fixed; top:16px; right:20px; z-index:10;
+  font-family:'Courier New',monospace; font-size:0.55rem;
+  letter-spacing:0.15em; color:rgba(255,255,255,0.2);
 }
 </style>
-
 </head>
 <body>
-
 <div id="container">
   <video id="vid" playsinline autoplay muted></video>
-  <canvas id="trail-canvas"></canvas>
-  <canvas id="live-canvas"></canvas>
+  <canvas id="c"></canvas>
 </div>
-
 <div id="start-screen">
   <h1>Body Web</h1>
   <p>Hände + Gesicht vor die Kamera.</p>
   <button id="start-btn" onclick="boot()">Starten</button>
 </div>
-
-<div id="fps">FPS <span id="fps-val">—</span></div>
-<button id="clear-btn" onclick="clearTrails()">Löschen</button>
+<div id="fps">FPS <span id="fv">—</span></div>
 
 <script>
-// ── CONFIG ────────────────────────────────────────────────────────────
-const FADE       = 0.15;   // trail fade speed
-const TRAIL_W    = 5;
-const HAND_HUES  = [200, 155, 125, 95, 60];
-const FACE_HUE   = 280;
-const FACE_HUE2  = 320;
+const HAND_HUES = [200,155,125,95,60];
+const FACE_HUE  = 280;
+const FACE_HUE2 = 320;
 
-// Only the most visually meaningful face contour indices
 const FACE_SILHOUETTE = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
 const FACE_LEFT_EYE   = [33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246];
 const FACE_RIGHT_EYE  = [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398];
 const FACE_LIPS       = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146];
 const FACE_BROW_L     = [70,63,105,66,107,55,65,52,53,46];
 const FACE_BROW_R     = [300,293,334,296,336,285,295,282,283,276];
-// Key highlight points only (drawn bigger, used for trails + web)
 const FACE_KEYS       = [33,133,362,263,61,291,1,4,10,152,234,454,70,300];
 
 const HAND_TIPS  = [4,8,12,16,20];
-const HAND_BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]];
+const HAND_BONES = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]
+];
+const CONTOURS = [
+  {path:FACE_SILHOUETTE, hue:FACE_HUE,  a:0.3, w:0.8, close:true},
+  {path:FACE_LEFT_EYE,   hue:190,       a:0.6, w:1.0, close:true},
+  {path:FACE_RIGHT_EYE,  hue:190,       a:0.6, w:1.0, close:true},
+  {path:FACE_LIPS,       hue:FACE_HUE2, a:0.55,w:1.2, close:true},
+  {path:FACE_BROW_L,     hue:FACE_HUE,  a:0.4, w:0.9},
+  {path:FACE_BROW_R,     hue:FACE_HUE,  a:0.4, w:0.9},
+];
 
-// ── STATE ─────────────────────────────────────────────────────────────
-const vid    = document.getElementById('vid');
-const trailC = document.getElementById('trail-canvas');
-const liveC  = document.getElementById('live-canvas');
-const tCtx   = trailC.getContext('2d');
-const lCtx   = liveC.getContext('2d');
+const vid  = document.getElementById('vid');
+const canv = document.getElementById('c');
+const ctx  = canv.getContext('2d');
 
-let W, H;
+let W, H, tick = 0;
+let lastHandLM = [null, null];
+let lastFaceLM = null;
+let fpsT = performance.now(), fpsN = 0;
+
 function resize() {
-  W = trailC.width = liveC.width = window.innerWidth;
-  H = trailC.height = liveC.height = window.innerHeight;
+  W = canv.width  = window.innerWidth;
+  H = canv.height = window.innerHeight;
 }
 window.addEventListener('resize', resize);
 resize();
 
-let tick = 0;
-let lastHandLM   = [null, null];
-let lastFaceLM   = null;
-let prevHandTips = [null, null];
-let prevFaceKeys = null;
-
-// FPS tracking
-let fpsT = performance.now(), fpsCount = 0;
-
-// ── COORDS ────────────────────────────────────────────────────────────
-function px(lm) {
-  return { x: (1 - lm.x) * W, y: lm.y * H };
-}
-
-// ── TRAIL ─────────────────────────────────────────────────────────────
-function seg(ctx, a, b, hue) {
-  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-  ctx.strokeStyle = `hsla(${hue},100%,65%,0.95)`;
-  ctx.lineWidth = TRAIL_W; ctx.lineCap = 'round';
-  ctx.shadowColor = `hsl(${hue},100%,65%)`; ctx.shadowBlur = 14;
-  ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-  ctx.strokeStyle = `hsla(${hue},40%,95%,0.6)`;
-  ctx.lineWidth = 1.5; ctx.shadowBlur = 0; ctx.stroke();
-}
-
-function updateTrails(handTips, faceKeys) {
-  tCtx.globalCompositeOperation = 'destination-out';
-  tCtx.fillStyle = `rgba(0,0,0,${FADE})`;
-  tCtx.fillRect(0, 0, W, H);
-  tCtx.globalCompositeOperation = 'source-over';
-
-  for (let h = 0; h < 2; h++) {
-    if (!handTips[h] || !prevHandTips[h]) continue;
-    for (let fi = 0; fi < 5; fi++) {
-      const a = prevHandTips[h][fi], b = handTips[h][fi];
-      if (a && b) seg(tCtx, a, b, HAND_HUES[fi]);
-    }
-  }
-  if (faceKeys && prevFaceKeys) {
-    for (let i = 0; i < faceKeys.length; i++) {
-      const a = prevFaceKeys[i], b = faceKeys[i];
-      if (a && b) seg(tCtx, a, b, FACE_HUE2);
-    }
-  }
-}
+function px(lm) { return { x:(1-lm.x)*W, y:lm.y*H }; }
 
 // ── WEB LINE ─────────────────────────────────────────────────────────
 function webLine(ax, ay, bx, by, hue, str) {
-  const p = 0.5 + 0.5 * Math.sin(tick + ax * 0.007);
-  const a = str * (0.2 + 0.5 * p);
-  lCtx.beginPath(); lCtx.moveTo(ax, ay); lCtx.lineTo(bx, by);
-  lCtx.strokeStyle = `hsla(${hue},90%,70%,${a})`;
-  lCtx.lineWidth = 0.5 + p * 1.5;
-  lCtx.shadowColor = `hsl(${hue},100%,75%)`; lCtx.shadowBlur = 8 + p * 12;
-  lCtx.stroke(); lCtx.shadowBlur = 0;
+  const p = 0.5 + 0.5 * Math.sin(tick + ax*0.007);
+  const a = str * (0.2 + 0.5*p);
+  ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by);
+  ctx.strokeStyle = `hsla(${hue},90%,70%,${a})`;
+  ctx.lineWidth = 0.5 + p*1.5;
+  ctx.shadowColor = `hsl(${hue},100%,75%)`; ctx.shadowBlur = 8+p*12;
+  ctx.stroke(); ctx.shadowBlur = 0;
 }
 
-// ── HAND SKELETON ─────────────────────────────────────────────────────
+// ── HAND ─────────────────────────────────────────────────────────────
 function drawHand(lm) {
   const all = lm.map(l => px(l));
-
-  // Bones — no shadow for perf
-  lCtx.strokeStyle = 'rgba(255,255,255,0.15)';
-  lCtx.lineWidth = 1;
-  lCtx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1; ctx.shadowBlur = 0;
   for (const [a,b] of HAND_BONES) {
-    lCtx.beginPath();
-    lCtx.moveTo(all[a].x, all[a].y);
-    lCtx.lineTo(all[b].x, all[b].y);
-    lCtx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(all[a].x,all[a].y);
+    ctx.lineTo(all[b].x,all[b].y);
+    ctx.stroke();
   }
-
-  // Joints
-  all.forEach((p, i) => {
-    const fi = HAND_TIPS.indexOf(i);
-    const isTip = fi >= 0;
+  all.forEach((p,i) => {
+    const fi = HAND_TIPS.indexOf(i), isTip = fi>=0;
     const hue = isTip ? HAND_HUES[fi] : 160;
-    lCtx.beginPath();
-    lCtx.arc(p.x, p.y, isTip ? 6 : 2, 0, Math.PI * 2);
-    lCtx.fillStyle = isTip ? `hsl(${hue},100%,70%)` : 'rgba(255,255,255,0.35)';
-    if (isTip) { lCtx.shadowColor = `hsl(${hue},100%,65%)`; lCtx.shadowBlur = 18; }
-    lCtx.fill();
-    lCtx.shadowBlur = 0;
-
+    ctx.beginPath(); ctx.arc(p.x,p.y, isTip?6:2, 0, Math.PI*2);
+    ctx.fillStyle = isTip ? `hsl(${hue},100%,70%)` : 'rgba(255,255,255,0.35)';
+    if (isTip) { ctx.shadowColor=`hsl(${hue},100%,65%)`; ctx.shadowBlur=18; }
+    ctx.fill(); ctx.shadowBlur=0;
     if (isTip) {
-      const pulse = 0.5 + 0.5 * Math.sin(tick * 2.5 + fi * 1.3);
-      lCtx.beginPath();
-      lCtx.arc(p.x, p.y, 10 + pulse * 6, 0, Math.PI * 2);
-      lCtx.strokeStyle = `hsla(${hue},100%,75%,${0.08 + pulse * 0.22})`;
-      lCtx.lineWidth = 1; lCtx.stroke();
+      const pulse = 0.5+0.5*Math.sin(tick*2.5+fi*1.3);
+      ctx.beginPath(); ctx.arc(p.x,p.y,10+pulse*6,0,Math.PI*2);
+      ctx.strokeStyle=`hsla(${hue},100%,75%,${0.08+pulse*0.22})`;
+      ctx.lineWidth=1; ctx.stroke();
     }
   });
-
   return HAND_TIPS.map(ti => all[ti]);
 }
 
-// ── FACE MESH ─────────────────────────────────────────────────────────
-// Pre-build contour paths once
-const CONTOURS = [
-  { path: FACE_SILHOUETTE, hue: FACE_HUE,  a: 0.3, w: 0.8, close: true },
-  { path: FACE_LEFT_EYE,   hue: 190,       a: 0.6, w: 1.0, close: true },
-  { path: FACE_RIGHT_EYE,  hue: 190,       a: 0.6, w: 1.0, close: true },
-  { path: FACE_LIPS,       hue: FACE_HUE2, a: 0.55,w: 1.2, close: true },
-  { path: FACE_BROW_L,     hue: FACE_HUE,  a: 0.4, w: 0.9 },
-  { path: FACE_BROW_R,     hue: FACE_HUE,  a: 0.4, w: 0.9 },
-];
-
+// ── FACE ─────────────────────────────────────────────────────────────
 function drawFace(lm) {
-  // All 468 pts — compute once
-  const pts = new Array(lm.length);
-  for (let i = 0; i < lm.length; i++) {
-    pts[i] = { x: (1 - lm[i].x) * W, y: lm[i].y * H };
-  }
-
-  const pulse = 0.5 + 0.5 * Math.sin(tick * 1.5);
-
-  // Contour lines — batched, no per-segment shadow
+  const pts = lm.map(l => ({x:(1-l.x)*W, y:l.y*H}));
+  const pulse = 0.5+0.5*Math.sin(tick*1.5);
   for (const c of CONTOURS) {
-    lCtx.beginPath();
-    lCtx.moveTo(pts[c.path[0]].x, pts[c.path[0]].y);
-    for (let i = 1; i < c.path.length; i++) {
-      lCtx.lineTo(pts[c.path[i]].x, pts[c.path[i]].y);
-    }
-    if (c.close) lCtx.closePath();
-    lCtx.strokeStyle = `hsla(${c.hue},90%,70%,${c.a * (0.7 + 0.3 * pulse)})`;
-    lCtx.lineWidth = c.w;
-    lCtx.shadowColor = `hsl(${c.hue},100%,75%)`;
-    lCtx.shadowBlur = 6 + pulse * 6;
-    lCtx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pts[c.path[0]].x, pts[c.path[0]].y);
+    for (let i=1;i<c.path.length;i++) ctx.lineTo(pts[c.path[i]].x,pts[c.path[i]].y);
+    if (c.close) ctx.closePath();
+    ctx.strokeStyle=`hsla(${c.hue},90%,70%,${c.a*(0.7+0.3*pulse)})`;
+    ctx.lineWidth=c.w;
+    ctx.shadowColor=`hsl(${c.hue},100%,75%)`; ctx.shadowBlur=5+pulse*6;
+    ctx.stroke();
   }
-  lCtx.shadowBlur = 0;
-
-  // ALL 468 dots — tiny, NO shadow (big perf win)
-  lCtx.fillStyle = `hsla(${FACE_HUE},80%,70%,0.4)`;
-  for (let i = 0; i < pts.length; i++) {
-    lCtx.beginPath();
-    lCtx.arc(pts[i].x, pts[i].y, 1.2, 0, Math.PI * 2);
-    lCtx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle=`hsla(${FACE_HUE},80%,70%,0.4)`;
+  for (let i=0;i<pts.length;i++) {
+    ctx.beginPath(); ctx.arc(pts[i].x,pts[i].y,1.2,0,Math.PI*2); ctx.fill();
   }
-
-  // Key points — bigger, with glow
   for (const ki of FACE_KEYS) {
-    const p = pts[ki];
-    const kpulse = 0.5 + 0.5 * Math.sin(tick * 3 + ki * 0.3);
-    lCtx.beginPath();
-    lCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-    lCtx.fillStyle = `hsla(${FACE_HUE2},100%,72%,0.9)`;
-    lCtx.shadowColor = `hsl(${FACE_HUE2},100%,70%)`;
-    lCtx.shadowBlur = 12;
-    lCtx.fill();
-    lCtx.shadowBlur = 0;
-
-    lCtx.beginPath();
-    lCtx.arc(p.x, p.y, 8 + kpulse * 4, 0, Math.PI * 2);
-    lCtx.strokeStyle = `hsla(${FACE_HUE2},100%,75%,${0.08 + kpulse * 0.2})`;
-    lCtx.lineWidth = 1; lCtx.stroke();
+    const p=pts[ki], kp=0.5+0.5*Math.sin(tick*3+ki*0.3);
+    ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2);
+    ctx.fillStyle=`hsla(${FACE_HUE2},100%,72%,0.9)`;
+    ctx.shadowColor=`hsl(${FACE_HUE2},100%,70%)`; ctx.shadowBlur=12;
+    ctx.fill(); ctx.shadowBlur=0;
+    ctx.beginPath(); ctx.arc(p.x,p.y,8+kp*4,0,Math.PI*2);
+    ctx.strokeStyle=`hsla(${FACE_HUE2},100%,75%,${0.08+kp*0.2})`;
+    ctx.lineWidth=1; ctx.stroke();
   }
-
   return FACE_KEYS.map(ki => pts[ki]);
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────
 function render() {
   tick += 0.07;
-  lCtx.clearRect(0, 0, W, H);
-  lCtx.lineCap = 'round';
+  ctx.clearRect(0,0,W,H);
+  ctx.lineCap='round';
 
-  const curHandTips = [null, null];
-  for (let h = 0; h < 2; h++) {
-    if (lastHandLM[h]) curHandTips[h] = drawHand(lastHandLM[h]);
-  }
+  const tips = [null,null];
+  for (let h=0;h<2;h++) if (lastHandLM[h]) tips[h]=drawHand(lastHandLM[h]);
 
-  let curFaceKeys = null;
-  if (lastFaceLM) curFaceKeys = drawFace(lastFaceLM);
+  let faceKeys = null;
+  if (lastFaceLM) faceKeys = drawFace(lastFaceLM);
 
-  // Hand↔Hand web
-  if (curHandTips[0] && curHandTips[1]) {
-    for (let fi = 0; fi < 5; fi++) {
-      const a = curHandTips[0][fi], b = curHandTips[1][fi];
-      const d = Math.hypot(a.x-b.x, a.y-b.y);
-      if (d < 700) webLine(a.x, a.y, b.x, b.y, HAND_HUES[fi], 1 - d/700);
+  // Hand↔Hand
+  if (tips[0]&&tips[1]) {
+    for (let fi=0;fi<5;fi++) {
+      const a=tips[0][fi],b=tips[1][fi];
+      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      if (d<700) webLine(a.x,a.y,b.x,b.y,HAND_HUES[fi],1-d/700);
     }
   }
-  // Within-hand web
-  for (let h = 0; h < 2; h++) {
-    if (!curHandTips[h]) continue;
-    for (let fi = 0; fi < 5; fi++) for (let fj = fi+1; fj < 5; fj++) {
-      const a = curHandTips[h][fi], b = curHandTips[h][fj];
-      const d = Math.hypot(a.x-b.x, a.y-b.y);
-      if (d < 230) webLine(a.x, a.y, b.x, b.y, (HAND_HUES[fi]+HAND_HUES[fj])/2, (1-d/230)*0.75);
+  // Within hand
+  for (let h=0;h<2;h++) {
+    if (!tips[h]) continue;
+    for (let fi=0;fi<5;fi++) for (let fj=fi+1;fj<5;fj++) {
+      const a=tips[h][fi],b=tips[h][fj];
+      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      if (d<230) webLine(a.x,a.y,b.x,b.y,(HAND_HUES[fi]+HAND_HUES[fj])/2,(1-d/230)*0.75);
     }
   }
-  // Hand↔Face web
-  if (curFaceKeys) {
-    for (let h = 0; h < 2; h++) {
-      if (!curHandTips[h]) continue;
-      for (const tp of curHandTips[h]) {
-        for (const fp of curFaceKeys) {
-          const d = Math.hypot(tp.x-fp.x, tp.y-fp.y);
-          if (d < 350) webLine(tp.x, tp.y, fp.x, fp.y, (HAND_HUES[2]+FACE_HUE)/2, (1-d/350)*0.45);
-        }
+  // Hand↔Face
+  if (faceKeys) {
+    for (let h=0;h<2;h++) {
+      if (!tips[h]) continue;
+      for (const tp of tips[h]) for (const fp of faceKeys) {
+        const d=Math.hypot(tp.x-fp.x,tp.y-fp.y);
+        if (d<350) webLine(tp.x,tp.y,fp.x,fp.y,(HAND_HUES[2]+FACE_HUE)/2,(1-d/350)*0.45);
       }
     }
   }
 
-  updateTrails(curHandTips, curFaceKeys);
-  prevHandTips = curHandTips.map(h => h ? [...h] : null);
-  prevFaceKeys = curFaceKeys ? [...curFaceKeys] : null;
-
-  // FPS
-  fpsCount++;
-  const now = performance.now();
-  if (now - fpsT > 500) {
-    document.getElementById('fps-val').textContent = Math.round(fpsCount * 1000 / (now - fpsT));
-    fpsT = now; fpsCount = 0;
+  fpsN++;
+  const now=performance.now();
+  if (now-fpsT>500) {
+    document.getElementById('fv').textContent=Math.round(fpsN*1000/(now-fpsT));
+    fpsT=now; fpsN=0;
   }
-
   requestAnimationFrame(render);
 }
 
-// ── MEDIAPIPE — separate setInterval loops at fixed rates ─────────────
-// Hands: 30fps cap, Face: 20fps cap — prevents pileup
+// ── MEDIAPIPE ─────────────────────────────────────────────────────────
 function initHands() {
-  const m = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}` });
-  m.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
-  m.onResults(r => {
-    lastHandLM = [null, null];
-    (r.multiHandLandmarks ?? []).forEach((lm, i) => {
-      lastHandLM[r.multiHandedness?.[i]?.label === 'Left' ? 0 : 1] = lm;
+  const m = new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+  m.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.6,minTrackingConfidence:0.5});
+  m.onResults(r=>{
+    lastHandLM=[null,null];
+    (r.multiHandLandmarks??[]).forEach((lm,i)=>{
+      lastHandLM[r.multiHandedness?.[i]?.label==='Left'?0:1]=lm;
     });
   });
-  // Send frames at ~30fps
-  setInterval(async () => {
-    if (vid.readyState >= 2) await m.send({ image: vid });
-  }, 33);
+  setInterval(async()=>{ if(vid.readyState>=2) await m.send({image:vid}); },33);
 }
 
 function initFace() {
-  const m = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
-  m.setOptions({ maxNumFaces: 1, refineLandmarks: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-  m.onResults(r => { lastFaceLM = r.multiFaceLandmarks?.[0] ?? null; });
-  // Send frames at ~20fps — face is slower, keep it cheaper
-  setInterval(async () => {
-    if (vid.readyState >= 2) await m.send({ image: vid });
-  }, 50);
+  const m = new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
+  m.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  m.onResults(r=>{ lastFaceLM=r.multiFaceLandmarks?.[0]??null; });
+  setInterval(async()=>{ if(vid.readyState>=2) await m.send({image:vid}); },50);
 }
 
 async function boot() {
-  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('start-screen').style.display='none';
   try {
-    const s = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    vid.srcObject = s;
-    await vid.play();
-    initHands();
-    initFace();
-    render();
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+    vid.srcObject=s; await vid.play();
+    initHands(); initFace(); render();
   } catch(e) {
-    alert('Kamera-Zugriff fehlgeschlagen:\n' + e.message + '\n\nBraucht localhost oder HTTPS.');
+    alert('Kamera-Zugriff fehlgeschlagen:\n'+e.message+'\n\nBraucht localhost oder HTTPS.');
   }
-}
-
-function clearTrails() {
-  tCtx.clearRect(0, 0, W, H);
-  prevHandTips = [null, null];
-  prevFaceKeys = null;
 }
 </script>
 
