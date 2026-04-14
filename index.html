@@ -4,23 +4,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Body Web</title>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<title>3D Mask</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#000; overflow:hidden; touch-action:none; }
 #container { position:fixed; inset:0; }
+
+/* Camera feed */
 #vid {
-  position:absolute; inset:0; width:100%; height:100%;
-  object-fit:cover; transform:scaleX(-1); z-index:1;
+position:absolute; inset:0; width:100%; height:100%;
+object-fit:cover; transform:scaleX(-1); z-index:1;
 }
-#c {
-  position:absolute; inset:0; width:100%; height:100%;
-  pointer-events:none; z-index:2;
+/* Three.js canvas on top — transparent bg */
+#three-canvas {
+position:absolute; inset:0; width:100%; height:100%;
+z-index:2; pointer-events:none;
 }
-/* Hidden SVG mask source */
-#mask-svg { display:none; }
+/* Hand web canvas */
+#hand-canvas {
+position:absolute; inset:0; width:100%; height:100%;
+z-index:3; pointer-events:none;
+}
 
 #start-screen {
 position:fixed; inset:0; background:#000; z-index:20;
@@ -29,7 +36,7 @@ align-items:center; justify-content:center; gap:14px;
 font-family:‘Courier New’,monospace;
 }
 #start-screen h1 {
-font-size:clamp(2rem,9vw,4.5rem); font-weight:400;
+font-size:clamp(2rem,9vw,4rem); font-weight:400;
 letter-spacing:0.25em; color:#fff; text-transform:uppercase;
 text-shadow:0 0 80px rgba(100,200,255,0.5);
 }
@@ -46,351 +53,354 @@ padding:14px 42px; cursor:pointer; border-radius:2px; margin-top:6px;
 #fps {
 position:fixed; top:16px; right:20px; z-index:10;
 font-family:‘Courier New’,monospace; font-size:0.55rem;
-letter-spacing:0.15em; color:rgba(255,255,255,0.2);
-}
-#toggle-btn {
-position:fixed; bottom:20px; right:20px; z-index:10;
-font-family:‘Courier New’,monospace; font-size:0.55rem;
-letter-spacing:0.2em; text-transform:uppercase;
-color:rgba(255,255,255,0.3); background:transparent;
-border:1px solid rgba(255,255,255,0.15);
-padding:8px 14px; cursor:pointer; border-radius:2px;
+letter-spacing:0.15em; color:rgba(255,255,255,0.25);
 }
 </style>
 
 </head>
 <body>
 
-<!-- Hidden SVG — mask template, drawn to offscreen canvas -->
-
-<svg id="mask-svg" viewBox="0 0 200 260" xmlns="http://www.w3.org/2000/svg" width="400" height="520">
-  <!-- Base face: white -->
-  <ellipse cx="100" cy="128" rx="78" ry="100" fill="#f0ede8"/>
-  <!-- Forehead arch -->
-  <path d="M 30 105 Q 100 18 170 105" fill="#f0ede8"/>
-
-  <!-- Cheek rouge -->
-
-  <ellipse cx="50" cy="148" rx="22" ry="13" fill="#c8706a" opacity="0.45"/>
-  <ellipse cx="150" cy="148" rx="22" ry="13" fill="#c8706a" opacity="0.45"/>
-
-  <!-- Eyebrows — dramatic arched -->
-
-  <path d="M 42 93 Q 68 76 94 90" stroke="#1a1a1a" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <path d="M 106 90 Q 132 76 158 93" stroke="#1a1a1a" stroke-width="5" fill="none" stroke-linecap="round"/>
-
-  <!-- Left eye hole -->
-
-  <ellipse cx="70" cy="114" rx="26" ry="18" fill="#111"/>
-  <ellipse cx="70" cy="114" rx="20" ry="13" fill="#0a0a15"/>
-  <!-- Left eye shine -->
-  <ellipse cx="63" cy="109" rx="5" ry="3" fill="rgba(255,255,255,0.08)"/>
-
-  <!-- Right eye hole -->
-
-  <ellipse cx="130" cy="114" rx="26" ry="18" fill="#111"/>
-  <ellipse cx="130" cy="114" rx="20" ry="13" fill="#0a0a15"/>
-  <!-- Right eye shine -->
-  <ellipse cx="123" cy="109" rx="5" ry="3" fill="rgba(255,255,255,0.08)"/>
-
-  <!-- Nose bridge + tip -->
-
-  <path d="M 94 130 L 86 158 Q 100 166 114 158 L 106 130 Z" fill="#ddd0c8"/>
-  <ellipse cx="86" cy="158" rx="10" ry="7" fill="#ccc0b8"/>
-  <ellipse cx="114" cy="158" rx="10" ry="7" fill="#ccc0b8"/>
-  <!-- Nostril shadows -->
-  <ellipse cx="86" cy="159" rx="6" ry="4" fill="#b09888" opacity="0.6"/>
-  <ellipse cx="114" cy="159" rx="6" ry="4" fill="#b09888" opacity="0.6"/>
-
-  <!-- Smile lines -->
-
-  <path d="M 58 158 Q 68 170 74 180" stroke="#bbb0a8" stroke-width="2" fill="none" opacity="0.7"/>
-  <path d="M 142 158 Q 132 170 126 180" stroke="#bbb0a8" stroke-width="2" fill="none" opacity="0.7"/>
-
-  <!-- Upper lip / philtrum -->
-
-  <path d="M 74 178 Q 88 172 100 176 Q 112 172 126 178" stroke="#555" stroke-width="1.5" fill="none"/>
-
-  <!-- Mouth — closed smirk -->
-
-  <path d="M 68 185 Q 100 200 132 185" fill="#cc8877" stroke="#995566" stroke-width="1.5"/>
-  <path d="M 68 185 Q 100 190 132 185" fill="#dd9988"/>
-
-  <!-- Chin dimple -->
-
-  <path d="M 93 220 Q 100 226 107 220" stroke="#c0b0a8" stroke-width="1.5" fill="none" opacity="0.5"/>
-
-  <!-- Mustache — signature Guy Fawkes -->
-
-  <!-- Left side -->
-
-  <path d="M 68 178 Q 72 195 62 205 Q 54 212 50 208 Q 60 200 64 188 Q 66 182 74 180 Z" fill="#1a1a1a"/>
-  <!-- Right side -->
-  <path d="M 132 178 Q 128 195 138 205 Q 146 212 150 208 Q 140 200 136 188 Q 134 182 126 180 Z" fill="#1a1a1a"/>
-  <!-- Center join -->
-  <path d="M 74 180 Q 100 188 126 180 Q 116 186 100 186 Q 84 186 74 180 Z" fill="#1a1a1a"/>
-
-  <!-- Chin beard / goatee -->
-
-  <path d="M 82 205 Q 90 232 100 240 Q 110 232 118 205 Q 108 220 100 225 Q 92 220 82 205 Z" fill="#1a1a1a"/>
-  <!-- Goatee highlight -->
-  <path d="M 96 215 Q 100 230 104 215" stroke="#333" stroke-width="1" fill="none" opacity="0.5"/>
-
-  <!-- Face outline / shadow -->
-
-  <ellipse cx="100" cy="128" rx="78" ry="100" fill="none" stroke="#c8b8a8" stroke-width="2" opacity="0.4"/>
-
-  <!-- Decorative lines on forehead (classic V for Vendetta) -->
-
-  <path d="M 68 55 Q 100 45 132 55" stroke="#ccc0b0" stroke-width="1" fill="none" opacity="0.3"/>
-</svg>
-
 <div id="container">
   <video id="vid" playsinline autoplay muted></video>
-  <canvas id="c"></canvas>
+  <canvas id="three-canvas"></canvas>
+  <canvas id="hand-canvas"></canvas>
 </div>
 
 <div id="start-screen">
-  <h1>Mask Web</h1>
-  <p>Gesicht + Hände vor die Kamera.</p>
+  <h1>3D Mask</h1>
+  <p>Gesicht + Hände vor die Kamera.<br>3D Maske folgt deinem Gesicht.</p>
   <button id="start-btn" onclick="boot()">Starten</button>
 </div>
-
 <div id="fps">FPS <span id="fv">—</span></div>
-<button id="toggle-btn" onclick="toggleMode()">Modus</button>
 
 <script>
-// ── CONFIG ────────────────────────────────────────────────────────────
-const HAND_HUES = [200,155,125,95,60];
-const FACE_HUE  = 280;
-const FACE_HUE2 = 320;
+// ═══════════════════════════════════════════════════════════════
+// THREE.JS SETUP — transparent renderer over video
+// ═══════════════════════════════════════════════════════════════
+const threeCanvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({
+  canvas: threeCanvas,
+  alpha: true,          // transparent background — video shows through
+  antialias: true
+});
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);  // fully transparent
 
-// Mode: 'mask' = only mask, 'web' = only web, 'both' = mask + web
-let mode = 'both';
-function toggleMode() {
-  const modes = ['both','mask','web'];
-  mode = modes[(modes.indexOf(mode)+1)%3];
-  document.getElementById('toggle-btn').textContent = mode;
+const scene  = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(
+  -window.innerWidth/2,  window.innerWidth/2,
+   window.innerHeight/2, -window.innerHeight/2,
+  -1000, 1000
+);
+camera.position.z = 500;
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.left   = -window.innerWidth/2;
+  camera.right  =  window.innerWidth/2;
+  camera.top    =  window.innerHeight/2;
+  camera.bottom = -window.innerHeight/2;
+  camera.updateProjectionMatrix();
+});
+
+// Lighting
+const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+dirLight.position.set(0.5, 1, 2);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.4);
+fillLight.position.set(-1, -0.5, 1);
+scene.add(fillLight);
+
+// ═══════════════════════════════════════════════════════════════
+// BUILD GUY FAWKES MASK GEOMETRY
+// Uses THREE shapes to construct a stylized mask
+// ═══════════════════════════════════════════════════════════════
+const maskGroup = new THREE.Group();
+scene.add(maskGroup);
+
+// Materials
+const skinMat = new THREE.MeshPhongMaterial({
+  color: 0xf0ede8, shininess: 30, specular: 0x444444,
+  side: THREE.FrontSide
+});
+const darkMat = new THREE.MeshPhongMaterial({
+  color: 0x111111, shininess: 10,
+  side: THREE.FrontSide
+});
+const redMat = new THREE.MeshPhongMaterial({
+  color: 0xcc6655, shininess: 20, transparent:true, opacity:0.7,
+});
+const pinkMat = new THREE.MeshPhongMaterial({
+  color: 0xdd9988, shininess: 15
+});
+
+// Helper: lathe-like oval face base
+function makeFaceBase() {
+  // Simple rounded face shape using SphereGeometry, flattened
+  const geo = new THREE.SphereGeometry(1, 32, 24, 0, Math.PI*2, 0, Math.PI);
+  geo.scale(0.78, 1.0, 0.18); // flat mask
+  return new THREE.Mesh(geo, skinMat);
 }
 
-// Face mesh contour indices
-const FACE_SILHOUETTE = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
-const FACE_LEFT_EYE   = [33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246];
-const FACE_RIGHT_EYE  = [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398];
-const FACE_LIPS       = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146];
-const FACE_BROW_L     = [70,63,105,66,107,55,65,52,53,46];
-const FACE_BROW_R     = [300,293,334,296,336,285,295,282,283,276];
-const FACE_KEYS       = [33,133,362,263,61,291,1,4,10,152,234,454,70,300];
+// Eye hole (black ellipse cutout — rendered as dark disc)
+function makeEyeHole(x) {
+  const geo = new THREE.EllipseCurve(0,0, 0.18,0.13, 0, Math.PI*2);
+  const pts = geo.getPoints(32);
+  const shape = new THREE.Shape(pts);
+  const geo2 = new THREE.ShapeGeometry(shape);
+  const mesh = new THREE.Mesh(geo2, darkMat);
+  mesh.position.set(x, 0.12, 0.01);
+  return mesh;
+}
 
+// Mustache side
+function makeMustacheSide(side) {
+  const shape = new THREE.Shape();
+  if (side === 'L') {
+    shape.moveTo(0,0);
+    shape.bezierCurveTo(-0.04, -0.1, -0.14, -0.14, -0.22, -0.08);
+    shape.bezierCurveTo(-0.18, -0.04, -0.08, 0.02, 0, 0);
+  } else {
+    shape.moveTo(0,0);
+    shape.bezierCurveTo(0.04, -0.1, 0.14, -0.14, 0.22, -0.08);
+    shape.bezierCurveTo(0.18, -0.04, 0.08, 0.02, 0, 0);
+  }
+  const geo = new THREE.ShapeGeometry(shape);
+  const mesh = new THREE.Mesh(geo, darkMat);
+  mesh.position.set(0, -0.18, 0.015);
+  return mesh;
+}
+
+// Goatee
+function makeGoatee() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.12, 0);
+  shape.bezierCurveTo(-0.1, -0.18, 0, -0.25, 0, -0.25);
+  shape.bezierCurveTo(0, -0.25, 0.1, -0.18, 0.12, 0);
+  shape.bezierCurveTo(0.06, -0.05, -0.06, -0.05, -0.12, 0);
+  const geo = new THREE.ShapeGeometry(shape);
+  return new THREE.Mesh(geo, darkMat);
+}
+
+// Eyebrow
+function makeEyebrow(side) {
+  const curve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(side*-0.22, 0, 0),
+    new THREE.Vector3(0, 0.06, 0),
+    new THREE.Vector3(side*0.22, 0, 0)
+  );
+  const pts = curve.getPoints(20);
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({color:0x111111, linewidth:3});
+  return new THREE.Line(geo, mat);
+}
+
+// Nose
+function makeNose() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.06, 0.08);
+  shape.lineTo(-0.09, -0.08);
+  shape.quadraticCurveTo(-0.09,-0.12, -0.04,-0.12);
+  shape.lineTo(0.04,-0.12);
+  shape.quadraticCurveTo(0.09,-0.12, 0.09,-0.08);
+  shape.lineTo(0.06, 0.08);
+  shape.lineTo(-0.06, 0.08);
+  const geo = new THREE.ShapeGeometry(shape);
+  return new THREE.Mesh(geo, new THREE.MeshPhongMaterial({color:0xd4c4bc,shininess:5}));
+}
+
+// Mouth
+function makeMouth() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.18, 0.02);
+  shape.quadraticCurveTo(0, -0.06, 0.18, 0.02);
+  shape.quadraticCurveTo(0, 0.04, -0.18, 0.02);
+  const geo = new THREE.ShapeGeometry(shape);
+  return new THREE.Mesh(geo, new THREE.MeshPhongMaterial({color:0xcc8877,shininess:20}));
+}
+
+// Cheek rouge
+function makeCheek(x) {
+  const geo = new THREE.CircleGeometry(0.15, 24);
+  const mesh = new THREE.Mesh(geo, redMat);
+  mesh.position.set(x, 0.0, 0.005);
+  return mesh;
+}
+
+// Assemble mask (in normalized space: face = ~1 unit tall, centered at 0,0)
+const faceBase = makeFaceBase();
+maskGroup.add(faceBase);
+
+const eyeL = makeEyeHole(-0.28);
+const eyeR = makeEyeHole(0.28);
+maskGroup.add(eyeL, eyeR);
+
+const browL = makeEyebrow(-1);
+browL.position.set(-0.28, 0.27, 0.02);
+const browR = makeEyebrow(1);
+browR.position.set(0.28, 0.27, 0.02);
+maskGroup.add(browL, browR);
+
+const nose = makeNose();
+nose.position.set(0, -0.08, 0.015);
+maskGroup.add(nose);
+
+const mouth = makeMouth();
+mouth.position.set(0, -0.28, 0.015);
+maskGroup.add(mouth);
+
+const mustL = makeMustacheSide('L');
+const mustR = makeMustacheSide('R');
+maskGroup.add(mustL, mustR);
+
+const goatee = makeGoatee();
+goatee.position.set(0, -0.35, 0.015);
+maskGroup.add(goatee);
+
+const cheekL = makeCheek(-0.42);
+const cheekR = makeCheek(0.42);
+maskGroup.add(cheekL, cheekR);
+
+// Face outline ring
+const ringGeo = new THREE.TorusGeometry(0.8, 0.012, 8, 60);
+ringGeo.scale(1, 1.28, 1);
+const ring = new THREE.Mesh(ringGeo, new THREE.MeshPhongMaterial({color:0xc8b8a8,shininess:5,transparent:true,opacity:0.35}));
+maskGroup.add(ring);
+
+maskGroup.visible = false;
+
+// ═══════════════════════════════════════════════════════════════
+// HAND WEB CANVAS
+// ═══════════════════════════════════════════════════════════════
+const handCanvas = document.getElementById('hand-canvas');
+const hCtx = handCanvas.getContext('2d');
+let HW = handCanvas.width = window.innerWidth;
+let HH = handCanvas.height = window.innerHeight;
+window.addEventListener('resize', () => {
+  HW = handCanvas.width = window.innerWidth;
+  HH = handCanvas.height = window.innerHeight;
+});
+
+const HAND_HUES  = [200,155,125,95,60];
 const HAND_TIPS  = [4,8,12,16,20];
-const HAND_BONES = [
-  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
-  [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
-  [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]
-];
-const CONTOURS = [
-  {path:FACE_SILHOUETTE,hue:FACE_HUE, a:0.3,w:0.8,close:true},
-  {path:FACE_LEFT_EYE,  hue:190,      a:0.6,w:1.0,close:true},
-  {path:FACE_RIGHT_EYE, hue:190,      a:0.6,w:1.0,close:true},
-  {path:FACE_LIPS,      hue:FACE_HUE2,a:0.55,w:1.2,close:true},
-  {path:FACE_BROW_L,    hue:FACE_HUE, a:0.4,w:0.9},
-  {path:FACE_BROW_R,    hue:FACE_HUE, a:0.4,w:0.9},
-];
+const HAND_BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]];
 
-// ── MASK SETUP ────────────────────────────────────────────────────────
-// Render SVG mask to offscreen canvas once
-const maskCanvas = document.createElement('canvas');
-maskCanvas.width = 400; maskCanvas.height = 520;
-const maskCtx = maskCanvas.getContext('2d');
-let maskReady = false;
-
-function prepareMask() {
-  const svg = document.getElementById('mask-svg');
-  const xml = new XMLSerializer().serializeToString(svg);
-  const blob = new Blob([xml], {type:'image/svg+xml'});
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    maskCtx.drawImage(img, 0, 0, 400, 520);
-    URL.revokeObjectURL(url);
-    maskReady = true;
-  };
-  img.src = url;
-}
-
-// ── CANVAS ────────────────────────────────────────────────────────────
-const vid  = document.getElementById('vid');
-const canv = document.getElementById('c');
-const ctx  = canv.getContext('2d');
-
-let W, H, tick = 0;
 let lastHandLM = [null,null];
-let lastFaceLM = null;
-let fpsT = performance.now(), fpsN = 0;
+let tick2 = 0;
 
-function resize() {
-  W = canv.width  = window.innerWidth;
-  H = canv.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
+function hpx(lm) { return {x:(1-lm.x)*HW, y:lm.y*HH}; }
 
-// ── MASK DRAWING ──────────────────────────────────────────────────────
-// Key face landmark indices for mask anchoring:
-// 10 = forehead top, 152 = chin bottom
-// 234 = left cheek edge, 454 = right cheek edge
-// 33 = left eye outer, 263 = right eye outer
-// 1 = nose tip, 61 = left mouth, 291 = right mouth
-
-function drawMask(lm) {
-  if (!maskReady) return null;
-
-  const pts = lm.map(l => ({x:(1-l.x)*W, y:l.y*H}));
-
-  // Anchor points
-  const forehead  = pts[10];
-  const chin      = pts[152];
-  const leftEdge  = pts[234];
-  const rightEdge = pts[454];
-  const noseTop   = pts[168];
-
-  // Face center
-  const cx = (leftEdge.x + rightEdge.x) / 2;
-  const cy = (forehead.y + chin.y) / 2;
-
-  // Face dimensions
-  const faceW = Math.hypot(rightEdge.x - leftEdge.x, rightEdge.y - leftEdge.y);
-  const faceH = Math.hypot(chin.x - forehead.x, chin.y - forehead.y);
-
-  // Scale to fit mask over face — mask SVG is 200x260 centered at 100,128
-  const scaleX = faceW / 156;  // 156 = mask face width in SVG units
-  const scaleY = faceH / 210;  // 210 = mask face height in SVG units
-
-  // Rotation: angle of face tilt
-  const dx = chin.x - forehead.x;
-  const dy = chin.y - forehead.y;
-  const angle = Math.atan2(dx, dy); // tilt
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(angle);
-  ctx.scale(scaleX, scaleY);
-  // Center mask: SVG center is at (100, 128) in 200x260 viewBox → canvas at (200, 260) in 400x520
-  ctx.drawImage(maskCanvas, -200, -266);
-  ctx.restore();
-
-  return pts;
-}
-
-// ── WEB LINE ─────────────────────────────────────────────────────────
 function webLine(ax,ay,bx,by,hue,str) {
-  const p = 0.5+0.5*Math.sin(tick+ax*0.007);
-  const a = str*(0.2+0.5*p);
-  ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by);
-  ctx.strokeStyle=`hsla(${hue},90%,70%,${a})`;
-  ctx.lineWidth=0.5+p*1.5;
-  ctx.shadowColor=`hsl(${hue},100%,75%)`; ctx.shadowBlur=8+p*12;
-  ctx.stroke(); ctx.shadowBlur=0;
+  const p=0.5+0.5*Math.sin(tick2+ax*0.007);
+  hCtx.beginPath(); hCtx.moveTo(ax,ay); hCtx.lineTo(bx,by);
+  hCtx.strokeStyle=`hsla(${hue},90%,70%,${str*(0.2+0.5*p)})`;
+  hCtx.lineWidth=0.5+p*1.5;
+  hCtx.shadowColor=`hsl(${hue},100%,75%)`; hCtx.shadowBlur=8+p*10;
+  hCtx.stroke(); hCtx.shadowBlur=0;
 }
 
-// ── HAND ─────────────────────────────────────────────────────────────
-function drawHand(lm) {
-  const all = lm.map(l=>({x:(1-l.x)*W,y:l.y*H}));
-  ctx.strokeStyle='rgba(255,255,255,0.15)';
-  ctx.lineWidth=1; ctx.shadowBlur=0;
-  for (const [a,b] of HAND_BONES) {
-    ctx.beginPath(); ctx.moveTo(all[a].x,all[a].y); ctx.lineTo(all[b].x,all[b].y); ctx.stroke();
-  }
-  all.forEach((p,i) => {
-    const fi=HAND_TIPS.indexOf(i), isTip=fi>=0;
-    const hue=isTip?HAND_HUES[fi]:160;
-    ctx.beginPath(); ctx.arc(p.x,p.y,isTip?6:2,0,Math.PI*2);
-    ctx.fillStyle=isTip?`hsl(${hue},100%,70%)`:'rgba(255,255,255,0.35)';
-    if(isTip){ctx.shadowColor=`hsl(${hue},100%,65%)`;ctx.shadowBlur=18;}
-    ctx.fill(); ctx.shadowBlur=0;
-    if(isTip){
-      const pulse=0.5+0.5*Math.sin(tick*2.5+fi*1.3);
-      ctx.beginPath(); ctx.arc(p.x,p.y,10+pulse*6,0,Math.PI*2);
-      ctx.strokeStyle=`hsla(${hue},100%,75%,${0.08+pulse*0.22})`;
-      ctx.lineWidth=1; ctx.stroke();
-    }
-  });
-  return HAND_TIPS.map(ti=>all[ti]);
-}
-
-// ── FACE WEB ─────────────────────────────────────────────────────────
-function drawFaceWeb(lm) {
-  const pts = lm.map(l=>({x:(1-l.x)*W,y:l.y*H}));
-  const pulse=0.5+0.5*Math.sin(tick*1.5);
-  for (const c of CONTOURS) {
-    ctx.beginPath();
-    ctx.moveTo(pts[c.path[0]].x,pts[c.path[0]].y);
-    for(let i=1;i<c.path.length;i++) ctx.lineTo(pts[c.path[i]].x,pts[c.path[i]].y);
-    if(c.close) ctx.closePath();
-    ctx.strokeStyle=`hsla(${c.hue},90%,70%,${c.a*(0.7+0.3*pulse)})`;
-    ctx.lineWidth=c.w;
-    ctx.shadowColor=`hsl(${c.hue},100%,75%)`; ctx.shadowBlur=5+pulse*6;
-    ctx.stroke();
-  }
-  ctx.shadowBlur=0;
-  ctx.fillStyle=`hsla(${FACE_HUE},80%,70%,0.4)`;
-  for(let i=0;i<pts.length;i++){ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,1.2,0,Math.PI*2);ctx.fill();}
-  for(const ki of FACE_KEYS){
-    const p=pts[ki],kp=0.5+0.5*Math.sin(tick*3+ki*0.3);
-    ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);
-    ctx.fillStyle=`hsla(${FACE_HUE2},100%,72%,0.9)`;
-    ctx.shadowColor=`hsl(${FACE_HUE2},100%,70%)`;ctx.shadowBlur=12;
-    ctx.fill();ctx.shadowBlur=0;
-  }
-  return FACE_KEYS.map(ki=>pts[ki]);
-}
-
-// ── RENDER ────────────────────────────────────────────────────────────
-function render() {
-  tick+=0.07;
-  ctx.clearRect(0,0,W,H);
-  ctx.lineCap='round';
-
+function drawHands() {
+  hCtx.clearRect(0,0,HW,HH);
+  hCtx.lineCap='round';
   const tips=[null,null];
-  for(let h=0;h<2;h++) if(lastHandLM[h]) tips[h]=drawHand(lastHandLM[h]);
-
-  let faceKeys=null;
-  if(lastFaceLM){
-    if(mode==='mask'||mode==='both'){
-      drawMask(lastFaceLM);
-    }
-    if(mode==='web'||mode==='both'){
-      faceKeys=drawFaceWeb(lastFaceLM);
-    } else {
-      faceKeys=FACE_KEYS.map(ki=>({x:(1-lastFaceLM[ki].x)*W,y:lastFaceLM[ki].y*H}));
-    }
+  for(let h=0;h<2;h++){
+    if(!lastHandLM[h]) continue;
+    const all=lastHandLM[h].map(l=>hpx(l));
+    hCtx.strokeStyle='rgba(255,255,255,0.12)'; hCtx.lineWidth=1; hCtx.shadowBlur=0;
+    for(const [a,b] of HAND_BONES){hCtx.beginPath();hCtx.moveTo(all[a].x,all[a].y);hCtx.lineTo(all[b].x,all[b].y);hCtx.stroke();}
+    all.forEach((p,i)=>{
+      const fi=HAND_TIPS.indexOf(i),isTip=fi>=0,hue=isTip?HAND_HUES[fi]:160;
+      hCtx.beginPath();hCtx.arc(p.x,p.y,isTip?6:2,0,Math.PI*2);
+      hCtx.fillStyle=isTip?`hsl(${hue},100%,70%)`:'rgba(255,255,255,0.3)';
+      if(isTip){hCtx.shadowColor=`hsl(${hue},100%,65%)`;hCtx.shadowBlur=16;}
+      hCtx.fill();hCtx.shadowBlur=0;
+    });
+    tips[h]=HAND_TIPS.map(ti=>all[ti]);
   }
-
-  // Webs
   if(tips[0]&&tips[1]){
-    for(let fi=0;fi<5;fi++){
-      const a=tips[0][fi],b=tips[1][fi];
-      const d=Math.hypot(a.x-b.x,a.y-b.y);
-      if(d<700) webLine(a.x,a.y,b.x,b.y,HAND_HUES[fi],1-d/700);
-    }
+    for(let fi=0;fi<5;fi++){const a=tips[0][fi],b=tips[1][fi],d=Math.hypot(a.x-b.x,a.y-b.y);if(d<700)webLine(a.x,a.y,b.x,b.y,HAND_HUES[fi],1-d/700);}
   }
   for(let h=0;h<2;h++){
     if(!tips[h]) continue;
     for(let fi=0;fi<5;fi++) for(let fj=fi+1;fj<5;fj++){
-      const a=tips[h][fi],b=tips[h][fj];
-      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      const a=tips[h][fi],b=tips[h][fj],d=Math.hypot(a.x-b.x,a.y-b.y);
       if(d<230) webLine(a.x,a.y,b.x,b.y,(HAND_HUES[fi]+HAND_HUES[fj])/2,(1-d/230)*0.75);
     }
   }
-  if(faceKeys){
-    for(let h=0;h<2;h++){
-      if(!tips[h]) continue;
-      for(const tp of tips[h]) for(const fp of faceKeys){
-        const d=Math.hypot(tp.x-fp.x,tp.y-fp.y);
-        if(d<350) webLine(tp.x,tp.y,fp.x,fp.y,(HAND_HUES[2]+FACE_HUE)/2,(1-d/350)*0.45);
-      }
-    }
-  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FACE TRACKING → 3D MASK POSITIONING
+// ═══════════════════════════════════════════════════════════════
+let lastFaceLM = null;
+
+// Key indices
+// 10=forehead, 152=chin, 234=left cheek, 454=right cheek
+// 33=left eye outer, 263=right eye outer
+
+function updateMask(lm) {
+  const W = window.innerWidth, H = window.innerHeight;
+
+  // Convert to screen coords (mirrored)
+  function s(i) { return { x:(1-lm[i].x)*W - W/2, y:-(lm[i].y*H - H/2), z:lm[i].z*W }; }
+
+  const forehead  = s(10);
+  const chin      = s(152);
+  const leftEdge  = s(234);
+  const rightEdge = s(454);
+
+  // Center of face
+  const cx = (forehead.x + chin.x) / 2;
+  const cy = (forehead.y + chin.y) / 2;
+
+  // Face dimensions → scale mask
+  const faceH = Math.hypot(chin.x-forehead.x, chin.y-forehead.y);
+  const faceW = Math.hypot(rightEdge.x-leftEdge.x, rightEdge.y-leftEdge.y);
+
+  // Mask in normalized space is 2 units tall (sphere r=1)
+  const scaleX = faceW * 0.72;
+  const scaleY = faceH * 0.56;
+  const scaleZ = scaleX * 0.3; // depth
+
+  // Rotation: tilt (roll)
+  const dx = chin.x - forehead.x;
+  const dy = chin.y - forehead.y;
+  const roll = Math.atan2(dx, dy);
+
+  // Yaw from left/right cheek asymmetry
+  const faceMidX = (leftEdge.x + rightEdge.x) / 2;
+  const expectedMidX = (leftEdge.x + rightEdge.x) / 2;
+  // Simple yaw: if face turned, cheek distances differ
+  const leftDist  = Math.abs(lm[234].x - lm[1].x); // left cheek to nose
+  const rightDist = Math.abs(lm[454].x - lm[1].x); // right cheek to nose
+  const yaw = (rightDist - leftDist) * Math.PI * 0.8;
+
+  // Pitch: forehead-chin vertical tilt
+  const pitch = Math.atan2(lm[152].y - lm[10].y - 0.7, 0.5) * 0.3;
+
+  maskGroup.position.set(cx, cy, 0);
+  maskGroup.scale.set(scaleX, scaleY, scaleZ);
+  maskGroup.rotation.set(pitch, yaw, roll);
+  maskGroup.visible = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════════════════
+let fpsT=performance.now(), fpsN=0;
+
+function animate() {
+  tick2 += 0.07;
+  requestAnimationFrame(animate);
+
+  if (lastFaceLM) updateMask(lastFaceLM);
+  else maskGroup.visible = false;
+
+  drawHands();
+  renderer.render(scene, camera);
 
   fpsN++;
   const now=performance.now();
@@ -398,12 +408,22 @@ function render() {
     document.getElementById('fv').textContent=Math.round(fpsN*1000/(now-fpsT));
     fpsT=now;fpsN=0;
   }
-  requestAnimationFrame(render);
 }
 
-// ── MEDIAPIPE ─────────────────────────────────────────────────────────
-function initHands(){
-  const m=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+// ═══════════════════════════════════════════════════════════════
+// MEDIAPIPE
+// ═══════════════════════════════════════════════════════════════
+const vid = document.getElementById('vid');
+
+function initFace() {
+  const m = new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
+  m.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  m.onResults(r=>{ lastFaceLM = r.multiFaceLandmarks?.[0] ?? null; });
+  setInterval(async()=>{if(vid.readyState>=2) await m.send({image:vid});}, 50);
+}
+
+function initHands() {
+  const m = new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
   m.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.6,minTrackingConfidence:0.5});
   m.onResults(r=>{
     lastHandLM=[null,null];
@@ -412,21 +432,15 @@ function initHands(){
   setInterval(async()=>{if(vid.readyState>=2) await m.send({image:vid});},33);
 }
 
-function initFace(){
-  const m=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
-  m.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
-  m.onResults(r=>{lastFaceLM=r.multiFaceLandmarks?.[0]??null;});
-  setInterval(async()=>{if(vid.readyState>=2) await m.send({image:vid});},50);
-}
-
-async function boot(){
+async function boot() {
   document.getElementById('start-screen').style.display='none';
-  prepareMask();
-  try{
-    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
     vid.srcObject=s; await vid.play();
-    initHands(); initFace(); render();
-  } catch(e){
+    initFace();
+    initHands();
+    animate();
+  } catch(e) {
     alert('Kamera-Zugriff fehlgeschlagen:\n'+e.message+'\n\nBraucht localhost oder HTTPS.');
   }
 }
