@@ -135,9 +135,11 @@ function px(lm) {
 
 // ── TRAILS ──────────────────────────────────────────────────────────
 function drawTrails(cur) {
-  // Fast fade: semi-opaque black layer
+  // Fast fade: draw semi-transparent black only where trails exist
+  tCtx.globalCompositeOperation = 'destination-out';
   tCtx.fillStyle = `rgba(0,0,0,${C.fadeAlpha})`;
   tCtx.fillRect(0, 0, trailC.width, trailC.height);
+  tCtx.globalCompositeOperation = 'source-over';
 
   for (let h = 0; h < 2; h++) {
     if (!cur[h] || !prevTips[h]) continue;
