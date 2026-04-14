@@ -174,44 +174,45 @@ function updateMask(lm) {
     };
   }
 
-  const top    = toScreen(10);   // forehead top
-  const bot    = toScreen(152);  // chin
+  // Use cheeks as vertical reference instead of chin (152 tracks too low)
+  const top    = toScreen(10);   // forehead
   const left   = toScreen(234);  // left cheek
   const right  = toScreen(454);  // right cheek
+  const chin   = toScreen(175);  // lower lip — much closer to actual chin on screen
+  const nose   = toScreen(1);    // nose tip — good center anchor
 
-  // Center of face
-  const cx = (top.x + bot.x) / 2;
-  const cy = (top.y + bot.y) / 2;
+  // Center on nose tip — most stable point
+  const cx = nose.x;
+  const cy = nose.y;
 
-  // Face dimensions
-  const faceH = Math.hypot(bot.x - top.x, bot.y - top.y);
+  // Face width from cheeks
   const faceW = Math.hypot(right.x - left.x, right.y - left.y);
+  // Face height: forehead to lower lip
+  const faceH = Math.hypot(top.x - chin.x, top.y - chin.y);
 
-  // Position
-  pivot.position.set(cx, cy + faceH * TUNE.yOffset, 0);
+  // Position — nose tip is roughly center of mask
+  pivot.position.set(cx, cy, 0);
 
-  // Scale — uniform, mask fits face
-  const sc = Math.max(faceW, faceH) * 0.95;
+  // Scale
+  const sc = faceW * 1.1;
   pivot.scale.set(sc, sc, sc * 0.35);
 
-  // ── ROLL (head tilt) ──
-  // Angle of forehead→chin vector, using raw (pre-mirror) lm values
-  const rawDX = -(lm[152].x - lm[10].x); // negated for mirror
-  const rawDY =  (lm[152].y - lm[10].y);
+  // ── ROLL ──
+  const rawDX = -(lm[175].x - lm[10].x);
+  const rawDY =  (lm[175].y - lm[10].y);
   const roll  = -Math.atan2(rawDX, rawDY);
 
-  // ── YAW (left/right turn) ──
-  // Nose position between cheeks in raw space
+  // ── YAW ──
   const nX  = lm[1].x;
   const lX  = lm[234].x;
   const rX  = lm[454].x;
   const fw  = Math.abs(rX - lX);
   const yaw = fw < 0.01 ? 0 : (0.5 - (nX - lX) / fw) * Math.PI * 1.5;
 
-  // ── PITCH (nod up/down) ──
-  const pitch = (lm[152].z - lm[10].z) * 4.0;
+  // ── PITCH ──
+  const pitch = (lm[175].z - lm[10].z) * 4.0;
 
-  pivot.rotation.set(pitch + TUNE.rotX, yaw + TUNE.rotY, roll + TUNE.rotZ);
+  pivot.rotation.set(pitch, yaw, roll);
   pivot.visible = true;
 }
 
@@ -238,7 +239,7 @@ function drawDebug() {
   // Show key landmarks as colored dots
   const pts = [
     { i:10,  color:'#ffff00', label:'Stirn' },
-    { i:152, color:'#00ffff', label:'Kinn'  },
+    { i:175, color:'#00ffff', label:'Kinn(175)' },
     { i:234, color:'#ff00ff', label:'L-Wange' },
     { i:454, color:'#ff8800', label:'R-Wange' },
     { i:1,   color:'#00ff00', label:'Nase'  },
@@ -254,8 +255,8 @@ function drawDebug() {
   }
 
   // Draw face center (where mask is positioned)
-  const cx = ((1-lm[10].x) + (1-lm[152].x)) / 2 * W;
-  const cy = (lm[10].y + lm[152].y) / 2 * H;
+  const cx = (1-lm[1].x) * W;
+  const cy = lm[1].y * H;
   dCtx.beginPath(); dCtx.arc(cx, cy, 10, 0, Math.PI*2);
   dCtx.strokeStyle = '#ffffff'; dCtx.lineWidth = 2; dCtx.stroke();
   dCtx.fillStyle = '#fff'; dCtx.fillText('MITTE', cx+12, cy+5);
