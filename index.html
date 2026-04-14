@@ -9,8 +9,36 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #000; overflow: hidden; touch-action: none; font-family: 'Courier New', monospace; }
-  #c { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
-  video { position: fixed; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+
+#container {
+position: fixed; inset: 0;
+width: 100vw; height: 100dvh;
+}
+
+/* VIDEO: visible, fills screen, mirrored */
+#vid {
+position: absolute; inset: 0;
+width: 100%; height: 100%;
+object-fit: cover;
+transform: scaleX(-1);
+z-index: 1;
+}
+
+/* TRAIL CANVAS: transparent background, pointer-events none */
+#trail-canvas {
+position: absolute; inset: 0;
+width: 100%; height: 100%;
+z-index: 2;
+pointer-events: none;
+}
+
+/* LIVE CANVAS: skeleton + web, cleared every frame */
+#live-canvas {
+position: absolute; inset: 0;
+width: 100%; height: 100%;
+z-index: 3;
+pointer-events: none;
+}
 
 #start-screen {
 position: fixed; inset: 0; background: #000;
@@ -39,14 +67,19 @@ letter-spacing: 0.2em; text-transform: uppercase;
 color: rgba(255,255,255,0.25); background: transparent;
 border: 1px solid rgba(255,255,255,0.12);
 padding: 9px 16px; cursor: pointer; border-radius: 2px;
+transition: color 0.2s, border-color 0.2s;
 }
+#clear-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.4); }
 </style>
 
 </head>
 <body>
 
-<canvas id="c"></canvas>
-<video id="vid" playsinline></video>
+<div id="container">
+  <video id="vid" playsinline autoplay muted></video>
+  <canvas id="trail-canvas"></canvas>
+  <canvas id="live-canvas"></canvas>
+</div>
 
 <div id="start-screen">
   <h1>Hand Web</h1>
@@ -57,9 +90,8 @@ padding: 9px 16px; cursor: pointer; border-radius: 2px;
 <button id="clear-btn" onclick="clearTrails()">Löschen</button>
 
 <script>
-// ── CONFIG ────────────────────────────────────────────────────────────
 const C = {
-  fadeAlpha:  0.18,   // trail fade speed (higher = faster)
+  fadeAlpha:  0.18,
   trailWidth: 5,
   webMaxDist: 700,
   innerDist:  230,
@@ -68,24 +100,12 @@ const C = {
   hues: [200, 155, 125, 95, 60],
 };
 
-// ── CANVAS SETUP ──────────────────────────────────────────────────────
-const canvas = document.getElementById('c');
-const ctx    = canvas.getContext('2d');
 const vid    = document.getElementById('vid');
+const trailC = document.getElementById('trail-canvas');
+const liveC  = document.getElementById('live-canvas');
+const tCtx   = trailC.getContext('2d');
+const lCtx   = liveC.getContext('2d');
 
-// Offscreen canvas for trails only (transparent bg, no video)
-const offscreen    = document.createElement('canvas');
-const offCtx       = offscreen.getContext('2d');
-
-let W, H;
-function resize() {
-  W = canvas.width  = offscreen.width  = window.innerWidth;
-  H = canvas.height = offscreen.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
-
-// ── STATE ─────────────────────────────────────────────────────────────
 let hands, tick = 0, lastT = 0;
 let lastLandmarks = [null, null];
 let prevTips = [null, null];
@@ -100,16 +120,33 @@ const BONES = [
   [5,9],[9,13],[13,17],[0,17]
 ];
 
+function resize() {
+  const W = window.innerWidth, H = window.innerHeight;
+  trailC.width  = liveC.width  = W;
+  trailC.height = liveC.height = H;
+  // CRITICAL: clearing canvas resets it to fully transparent
+}
+window.addEventListener('resize', resize);
+resize();
+
 function px(lm) {
-  return { x: (1 - lm.x) * W, y: lm.y * H };
+  return {
+    x: (1 - lm.x) * liveC.width,
+    y: lm.y * liveC.height
+  };
 }
 
-// ── TRAILS (on offscreen, then composited) ────────────────────────────
+// ── TRAILS ───────────────────────────────────────────────────────────
+// Key: tCtx background is transparent. We use destination-out to erase
+// existing pixels by alpha, creating fade without any opaque fill.
 function updateTrails(curTips) {
-  // Fade existing trails
-  offCtx.fillStyle = `rgba(0,0,0,${C.fadeAlpha})`;
-  offCtx.fillRect(0, 0, W, H);
+  // Erase existing trail pixels slightly each frame = fade effect
+  tCtx.globalCompositeOperation = 'destination-out';
+  tCtx.fillStyle = `rgba(0, 0, 0, ${C.fadeAlpha})`;
+  tCtx.fillRect(0, 0, trailC.width, trailC.height);
+  tCtx.globalCompositeOperation = 'source-over';
 
+  // Draw new trail segments
   for (let h = 0; h < 2; h++) {
     if (!curTips[h] || !prevTips[h]) continue;
     TIPS.forEach((_, fi) => {
@@ -117,56 +154,54 @@ function updateTrails(curTips) {
       if (!a || !b) return;
       const hue = C.hues[fi];
 
-      // Glow layer
-      offCtx.beginPath();
-      offCtx.moveTo(a.x, a.y);
-      offCtx.lineTo(b.x, b.y);
-      offCtx.strokeStyle = `hsla(${hue}, 100%, 65%, 0.9)`;
-      offCtx.lineWidth = C.trailWidth;
-      offCtx.lineCap = 'round';
-      offCtx.shadowColor = `hsl(${hue}, 100%, 65%)`;
-      offCtx.shadowBlur = 16;
-      offCtx.stroke();
+      tCtx.beginPath();
+      tCtx.moveTo(a.x, a.y);
+      tCtx.lineTo(b.x, b.y);
+      tCtx.strokeStyle = `hsla(${hue}, 100%, 65%, 0.95)`;
+      tCtx.lineWidth = C.trailWidth;
+      tCtx.lineCap = 'round';
+      tCtx.shadowColor = `hsl(${hue}, 100%, 65%)`;
+      tCtx.shadowBlur = 16;
+      tCtx.stroke();
 
-      // White core
-      offCtx.beginPath();
-      offCtx.moveTo(a.x, a.y);
-      offCtx.lineTo(b.x, b.y);
-      offCtx.strokeStyle = `hsla(${hue}, 50%, 95%, 0.65)`;
-      offCtx.lineWidth = 1.5;
-      offCtx.shadowBlur = 0;
-      offCtx.stroke();
+      // Bright core
+      tCtx.beginPath();
+      tCtx.moveTo(a.x, a.y);
+      tCtx.lineTo(b.x, b.y);
+      tCtx.strokeStyle = `hsla(${hue}, 50%, 95%, 0.7)`;
+      tCtx.lineWidth = 1.5;
+      tCtx.shadowBlur = 0;
+      tCtx.stroke();
     });
   }
 }
 
-// ── WEB ───────────────────────────────────────────────────────────────
+// ── WEB ──────────────────────────────────────────────────────────────
 function webLine(ax, ay, bx, by, hue, strength) {
   const pulse = 0.5 + 0.5 * Math.sin(tick + ax * 0.007 + ay * 0.005);
   const alpha = strength * (0.25 + 0.55 * pulse);
   const w     = 0.5 + pulse * 1.8;
 
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
-  ctx.strokeStyle = `hsla(${hue}, 90%, 65%, ${alpha * 0.5})`;
-  ctx.lineWidth = w + 3;
-  ctx.shadowColor = `hsl(${hue}, 100%, 75%)`;
-  ctx.shadowBlur = 14 + pulse * 16;
-  ctx.stroke();
+  lCtx.beginPath();
+  lCtx.moveTo(ax, ay);
+  lCtx.lineTo(bx, by);
+  lCtx.strokeStyle = `hsla(${hue}, 90%, 65%, ${alpha * 0.5})`;
+  lCtx.lineWidth = w + 3;
+  lCtx.shadowColor = `hsl(${hue}, 100%, 75%)`;
+  lCtx.shadowBlur = 14 + pulse * 16;
+  lCtx.stroke();
 
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
-  ctx.strokeStyle = `hsla(${hue}, 85%, 78%, ${alpha})`;
-  ctx.lineWidth = w;
-  ctx.shadowBlur = 0;
-  ctx.stroke();
+  lCtx.beginPath();
+  lCtx.moveTo(ax, ay);
+  lCtx.lineTo(bx, by);
+  lCtx.strokeStyle = `hsla(${hue}, 85%, 78%, ${alpha})`;
+  lCtx.lineWidth = w;
+  lCtx.shadowBlur = 0;
+  lCtx.stroke();
 }
 
 function drawWeb(tips) {
-  ctx.lineCap = 'round';
-
+  lCtx.lineCap = 'round';
   if (tips[0] && tips[1]) {
     TIPS.forEach((_, fi) => {
       const a = tips[0][fi], b = tips[1][fi];
@@ -175,7 +210,6 @@ function drawWeb(tips) {
       if (d < C.webMaxDist) webLine(a.x, a.y, b.x, b.y, C.hues[fi], 1 - d / C.webMaxDist);
     });
   }
-
   for (let h = 0; h < 2; h++) {
     if (!tips[h]) continue;
     for (let fi = 0; fi < 5; fi++) {
@@ -184,29 +218,28 @@ function drawWeb(tips) {
         if (!a || !b) continue;
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (d < C.innerDist) {
-          const hue = (C.hues[fi] + C.hues[fj]) / 2;
-          webLine(a.x, a.y, b.x, b.y, hue, (1 - d / C.innerDist) * 0.75);
+          webLine(a.x, a.y, b.x, b.y, (C.hues[fi] + C.hues[fj]) / 2, (1 - d / C.innerDist) * 0.75);
         }
       }
     }
   }
 }
 
-// ── SKELETON ──────────────────────────────────────────────────────────
+// ── SKELETON ─────────────────────────────────────────────────────────
 function drawSkeleton(lm) {
   const all = lm.map(l => px(l));
 
   for (const [a, b] of BONES) {
-    ctx.beginPath();
-    ctx.moveTo(all[a].x, all[a].y);
-    ctx.lineTo(all[b].x, all[b].y);
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-    ctx.lineWidth = 1;
-    ctx.shadowColor = 'rgba(150,240,255,0.3)';
-    ctx.shadowBlur = 5;
-    ctx.stroke();
+    lCtx.beginPath();
+    lCtx.moveTo(all[a].x, all[a].y);
+    lCtx.lineTo(all[b].x, all[b].y);
+    lCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+    lCtx.lineWidth = 1;
+    lCtx.shadowColor = 'rgba(150,240,255,0.3)';
+    lCtx.shadowBlur = 5;
+    lCtx.stroke();
   }
-  ctx.shadowBlur = 0;
+  lCtx.shadowBlur = 0;
 
   all.forEach((p, i) => {
     const fi    = TIPS.indexOf(i);
@@ -214,27 +247,21 @@ function drawSkeleton(lm) {
     const hue   = isTip ? C.hues[fi] : 160;
     const r     = isTip ? 7 : 2.5;
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = isTip ? `hsl(${hue}, 100%, 72%)` : 'rgba(255,255,255,0.45)';
-    ctx.shadowColor = isTip ? `hsl(${hue}, 100%, 65%)` : 'transparent';
-    ctx.shadowBlur = isTip ? C.glowBlur : 0;
-    ctx.fill();
-    ctx.shadowBlur = 0;
+    lCtx.beginPath();
+    lCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    lCtx.fillStyle = isTip ? `hsl(${hue}, 100%, 72%)` : 'rgba(255,255,255,0.45)';
+    lCtx.shadowColor = isTip ? `hsl(${hue}, 100%, 65%)` : 'transparent';
+    lCtx.shadowBlur = isTip ? C.glowBlur : 0;
+    lCtx.fill();
+    lCtx.shadowBlur = 0;
 
     if (isTip) {
       const pulse = 0.5 + 0.5 * Math.sin(tick * 2.5 + fi * 1.3);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 11 + pulse * 6, 0, Math.PI * 2);
-      ctx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.12 + pulse * 0.28})`;
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 19 + pulse * 4, 0, Math.PI * 2);
-      ctx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.05 + pulse * 0.1})`;
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
+      lCtx.beginPath();
+      lCtx.arc(p.x, p.y, 11 + pulse * 6, 0, Math.PI * 2);
+      lCtx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.12 + pulse * 0.28})`;
+      lCtx.lineWidth = 1.2;
+      lCtx.stroke();
     }
   });
 
@@ -245,38 +272,17 @@ function drawSkeleton(lm) {
 function render() {
   tick += C.pulseSpd;
 
-  // 1. Draw video feed mirrored as background
-  ctx.save();
-  ctx.translate(W, 0);
-  ctx.scale(-1, 1);
-  if (vid.readyState >= 2) ctx.drawImage(vid, 0, 0, W, H);
-  ctx.restore();
+  // Live canvas: fully cleared every frame (transparent = video shows through)
+  lCtx.clearRect(0, 0, liveC.width, liveC.height);
 
-  // 2. Subtle darkening so overlays pop
-  ctx.fillStyle = 'rgba(0,0,10,0.25)';
-  ctx.fillRect(0, 0, W, H);
-
-  // 3. Composite trail offscreen on top (trails have their own fade)
-  ctx.drawImage(offscreen, 0, 0);
-
-  // 4. Skeleton + web on top
   const curTips = [null, null];
   for (let h = 0; h < 2; h++) {
     if (lastLandmarks[h]) curTips[h] = drawSkeleton(lastLandmarks[h]);
   }
   drawWeb(curTips);
-
-  // 5. Update trail offscreen
   updateTrails(curTips);
+
   prevTips = curTips.map(h => h ? [...h] : null);
-
-  // 6. Vignette
-  const vig = ctx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.85);
-  vig.addColorStop(0, 'transparent');
-  vig.addColorStop(1, 'rgba(0,0,0,0.5)');
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, W, H);
-
   requestAnimationFrame(render);
 }
 
@@ -321,7 +327,7 @@ async function boot() {
 }
 
 function clearTrails() {
-  offCtx.clearRect(0, 0, W, H);
+  tCtx.clearRect(0, 0, trailC.width, trailC.height);
   prevTips = [null, null];
 }
 </script>
