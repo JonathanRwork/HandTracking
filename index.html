@@ -4,18 +4,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Hand Web</title>
+<title>Hand + Face Web</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #000; overflow: hidden; touch-action: none; font-family: 'Courier New', monospace; }
 
-#container {
-position: fixed; inset: 0;
-width: 100vw; height: 100dvh;
-}
+#container { position: fixed; inset: 0; width: 100vw; height: 100dvh; }
 
-/* VIDEO: visible, fills screen, mirrored */
 #vid {
 position: absolute; inset: 0;
 width: 100%; height: 100%;
@@ -24,20 +21,13 @@ transform: scaleX(-1);
 z-index: 1;
 }
 
-/* TRAIL CANVAS: transparent background, pointer-events none */
 #trail-canvas {
-position: absolute; inset: 0;
-width: 100%; height: 100%;
-z-index: 2;
-pointer-events: none;
+position: absolute; inset: 0; width: 100%; height: 100%;
+z-index: 2; pointer-events: none;
 }
-
-/* LIVE CANVAS: skeleton + web, cleared every frame */
 #live-canvas {
-position: absolute; inset: 0;
-width: 100%; height: 100%;
-z-index: 3;
-pointer-events: none;
+position: absolute; inset: 0; width: 100%; height: 100%;
+z-index: 3; pointer-events: none;
 }
 
 #start-screen {
@@ -46,12 +36,12 @@ display: flex; flex-direction: column;
 align-items: center; justify-content: center; gap: 16px; z-index: 20;
 }
 #start-screen h1 {
-font-size: clamp(2.5rem, 10vw, 5rem); font-weight: 400;
+font-size: clamp(2rem, 9vw, 4.5rem); font-weight: 400;
 letter-spacing: 0.25em; color: #fff; text-transform: uppercase;
 text-shadow: 0 0 80px rgba(100,220,255,0.5);
 }
 #start-screen p {
-font-size: 0.65rem; letter-spacing: 0.18em;
+font-size: 0.65rem; letter-spacing: 0.15em;
 color: rgba(255,255,255,0.3); text-align: center; line-height: 2;
 }
 #start-btn {
@@ -64,12 +54,15 @@ padding: 15px 44px; cursor: pointer; border-radius: 2px; margin-top: 8px;
 position: fixed; bottom: 22px; right: 22px; z-index: 10;
 font-family: ‘Courier New’, monospace; font-size: 0.55rem;
 letter-spacing: 0.2em; text-transform: uppercase;
-color: rgba(255,255,255,0.25); background: transparent;
-border: 1px solid rgba(255,255,255,0.12);
+color: rgba(255,255,255,0.22); background: transparent;
+border: 1px solid rgba(255,255,255,0.1);
 padding: 9px 16px; cursor: pointer; border-radius: 2px;
-transition: color 0.2s, border-color 0.2s;
 }
-#clear-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.4); }
+#status {
+position: fixed; top: 18px; left: 24px; z-index: 10;
+font-size: 0.55rem; letter-spacing: 0.2em; color: rgba(255,255,255,0.2);
+text-transform: uppercase;
+}
 </style>
 
 </head>
@@ -82,14 +75,16 @@ transition: color 0.2s, border-color 0.2s;
 </div>
 
 <div id="start-screen">
-  <h1>Hand Web</h1>
-  <p>Beide Hände vor die Kamera.<br>Finger spinnen ein leuchtendes Netz.</p>
+  <h1>Body Web</h1>
+  <p>Hände + Gesicht vor die Kamera.<br>Alles wird zu leuchtendem Netz.</p>
   <button id="start-btn" onclick="boot()">Starten</button>
 </div>
 
+<div id="status">Lade…</div>
 <button id="clear-btn" onclick="clearTrails()">Löschen</button>
 
 <script>
+// ── CONFIG ────────────────────────────────────────────────────────────
 const C = {
   fadeAlpha:  0.18,
   trailWidth: 5,
@@ -97,21 +92,44 @@ const C = {
   innerDist:  230,
   pulseSpd:   0.07,
   glowBlur:   22,
-  hues: [200, 155, 125, 95, 60],
+  handHues:   [200, 155, 125, 95, 60],
+  faceHue:    280,   // purple for face
+  faceHue2:   320,   // pink for face highlights
 };
 
+// Key face landmark indices (from MediaPipe Face Mesh 468 points)
+// Contour groups: silhouette, lips, eyes, eyebrows, nose
+const FACE_SILHOUETTE = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+const FACE_LIPS_OUTER = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146];
+const FACE_LIPS_INNER = [78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95];
+const FACE_LEFT_EYE   = [33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246];
+const FACE_RIGHT_EYE  = [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398];
+const FACE_LEFT_BROW  = [70,63,105,66,107,55,65,52,53,46];
+const FACE_RIGHT_BROW = [300,293,334,296,336,285,295,282,283,276];
+const FACE_NOSE       = [168,6,197,195,5,4,1,19,94,2,164,98,97,2,326,327];
+
+// Special highlight points (eyes, mouth corners, nose tip) — bigger dots
+const FACE_KEY_PTS = [33, 133, 362, 263, 61, 291, 1, 4, 10, 152];
+
+// ── SETUP ─────────────────────────────────────────────────────────────
 const vid    = document.getElementById('vid');
 const trailC = document.getElementById('trail-canvas');
 const liveC  = document.getElementById('live-canvas');
 const tCtx   = trailC.getContext('2d');
 const lCtx   = liveC.getContext('2d');
+const status = document.getElementById('status');
 
-let hands, tick = 0, lastT = 0;
-let lastLandmarks = [null, null];
-let prevTips = [null, null];
+let handsModel, faceModel;
+let handsReady = false, faceReady = false;
+let tick = 0;
 
-const TIPS  = [4, 8, 12, 16, 20];
-const BONES = [
+let lastHandLM   = [null, null];
+let lastFaceLM   = null;
+let prevHandTips = [null, null];
+let prevFacePts  = null;
+
+const HAND_TIPS  = [4, 8, 12, 16, 20];
+const HAND_BONES = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
   [0,9],[9,10],[10,11],[11,12],
@@ -120,75 +138,82 @@ const BONES = [
   [5,9],[9,13],[13,17],[0,17]
 ];
 
+let W, H;
 function resize() {
-  const W = window.innerWidth, H = window.innerHeight;
-  trailC.width  = liveC.width  = W;
-  trailC.height = liveC.height = H;
-  // CRITICAL: clearing canvas resets it to fully transparent
+  W = trailC.width = liveC.width = window.innerWidth;
+  H = trailC.height = liveC.height = window.innerHeight;
 }
 window.addEventListener('resize', resize);
 resize();
 
-function px(lm) {
+function px(lm, mirror = true) {
   return {
-    x: (1 - lm.x) * liveC.width,
-    y: lm.y * liveC.height
+    x: mirror ? (1 - lm.x) * W : lm.x * W,
+    y: lm.y * H
   };
 }
 
 // ── TRAILS ───────────────────────────────────────────────────────────
-// Key: tCtx background is transparent. We use destination-out to erase
-// existing pixels by alpha, creating fade without any opaque fill.
-function updateTrails(curTips) {
-  // Erase existing trail pixels slightly each frame = fade effect
+function updateTrails(handTips, facePts) {
+  // Fade
   tCtx.globalCompositeOperation = 'destination-out';
-  tCtx.fillStyle = `rgba(0, 0, 0, ${C.fadeAlpha})`;
-  tCtx.fillRect(0, 0, trailC.width, trailC.height);
+  tCtx.fillStyle = `rgba(0,0,0,${C.fadeAlpha})`;
+  tCtx.fillRect(0, 0, W, H);
   tCtx.globalCompositeOperation = 'source-over';
 
-  // Draw new trail segments
+  // Hand trails
   for (let h = 0; h < 2; h++) {
-    if (!curTips[h] || !prevTips[h]) continue;
-    TIPS.forEach((_, fi) => {
-      const a = prevTips[h][fi], b = curTips[h][fi];
+    if (!handTips[h] || !prevHandTips[h]) continue;
+    HAND_TIPS.forEach((_, fi) => {
+      const a = prevHandTips[h][fi], b = handTips[h][fi];
       if (!a || !b) return;
-      const hue = C.hues[fi];
+      const hue = C.handHues[fi];
+      drawTrailSegment(tCtx, a, b, hue);
+    });
+  }
 
-      tCtx.beginPath();
-      tCtx.moveTo(a.x, a.y);
-      tCtx.lineTo(b.x, b.y);
-      tCtx.strokeStyle = `hsla(${hue}, 100%, 65%, 0.95)`;
-      tCtx.lineWidth = C.trailWidth;
-      tCtx.lineCap = 'round';
-      tCtx.shadowColor = `hsl(${hue}, 100%, 65%)`;
-      tCtx.shadowBlur = 16;
-      tCtx.stroke();
-
-      // Bright core
-      tCtx.beginPath();
-      tCtx.moveTo(a.x, a.y);
-      tCtx.lineTo(b.x, b.y);
-      tCtx.strokeStyle = `hsla(${hue}, 50%, 95%, 0.7)`;
-      tCtx.lineWidth = 1.5;
-      tCtx.shadowBlur = 0;
-      tCtx.stroke();
+  // Face trails — only key points to avoid clutter
+  if (facePts && prevFacePts) {
+    FACE_KEY_PTS.forEach(idx => {
+      const a = prevFacePts[idx], b = facePts[idx];
+      if (!a || !b) return;
+      drawTrailSegment(tCtx, a, b, C.faceHue2);
     });
   }
 }
 
-// ── WEB ──────────────────────────────────────────────────────────────
+function drawTrailSegment(ctx, a, b, hue) {
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = `hsla(${hue}, 100%, 65%, 0.95)`;
+  ctx.lineWidth = C.trailWidth;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = `hsl(${hue}, 100%, 65%)`;
+  ctx.shadowBlur = 16;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = `hsla(${hue}, 40%, 95%, 0.65)`;
+  ctx.lineWidth = 1.5;
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+}
+
+// ── WEB ───────────────────────────────────────────────────────────────
 function webLine(ax, ay, bx, by, hue, strength) {
   const pulse = 0.5 + 0.5 * Math.sin(tick + ax * 0.007 + ay * 0.005);
-  const alpha = strength * (0.25 + 0.55 * pulse);
-  const w     = 0.5 + pulse * 1.8;
+  const alpha = strength * (0.2 + 0.5 * pulse);
+  const w     = 0.4 + pulse * 1.6;
 
   lCtx.beginPath();
   lCtx.moveTo(ax, ay);
   lCtx.lineTo(bx, by);
-  lCtx.strokeStyle = `hsla(${hue}, 90%, 65%, ${alpha * 0.5})`;
+  lCtx.strokeStyle = `hsla(${hue}, 90%, 65%, ${alpha * 0.45})`;
   lCtx.lineWidth = w + 3;
   lCtx.shadowColor = `hsl(${hue}, 100%, 75%)`;
-  lCtx.shadowBlur = 14 + pulse * 16;
+  lCtx.shadowBlur = 12 + pulse * 14;
   lCtx.stroke();
 
   lCtx.beginPath();
@@ -200,16 +225,18 @@ function webLine(ax, ay, bx, by, hue, strength) {
   lCtx.stroke();
 }
 
-function drawWeb(tips) {
+function drawHandWeb(tips) {
   lCtx.lineCap = 'round';
+  // Cross-hand
   if (tips[0] && tips[1]) {
-    TIPS.forEach((_, fi) => {
+    HAND_TIPS.forEach((_, fi) => {
       const a = tips[0][fi], b = tips[1][fi];
       if (!a || !b) return;
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d < C.webMaxDist) webLine(a.x, a.y, b.x, b.y, C.hues[fi], 1 - d / C.webMaxDist);
+      if (d < C.webMaxDist) webLine(a.x, a.y, b.x, b.y, C.handHues[fi], 1 - d / C.webMaxDist);
     });
   }
+  // Within hand
   for (let h = 0; h < 2; h++) {
     if (!tips[h]) continue;
     for (let fi = 0; fi < 5; fi++) {
@@ -218,38 +245,58 @@ function drawWeb(tips) {
         if (!a || !b) continue;
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (d < C.innerDist) {
-          webLine(a.x, a.y, b.x, b.y, (C.hues[fi] + C.hues[fj]) / 2, (1 - d / C.innerDist) * 0.75);
+          webLine(a.x, a.y, b.x, b.y, (C.handHues[fi] + C.handHues[fj]) / 2, (1 - d / C.innerDist) * 0.75);
         }
       }
     }
   }
 }
 
-// ── SKELETON ─────────────────────────────────────────────────────────
-function drawSkeleton(lm) {
+// Web from fingertips → nearest face key points
+function drawHandFaceWeb(handTips, facePts) {
+  if (!facePts) return;
+  const faceKeyScreenPts = FACE_KEY_PTS.map(i => facePts[i]).filter(Boolean);
+
+  for (let h = 0; h < 2; h++) {
+    if (!handTips[h]) continue;
+    handTips[h].forEach((tp, fi) => {
+      if (!tp) return;
+      faceKeyScreenPts.forEach(fp => {
+        const d = Math.hypot(tp.x - fp.x, tp.y - fp.y);
+        if (d < 350) {
+          const hue = (C.handHues[fi] + C.faceHue) / 2;
+          webLine(tp.x, tp.y, fp.x, fp.y, hue, (1 - d / 350) * 0.5);
+        }
+      });
+    });
+  }
+}
+
+// ── HAND SKELETON ─────────────────────────────────────────────────────
+function drawHandSkeleton(lm) {
   const all = lm.map(l => px(l));
 
-  for (const [a, b] of BONES) {
+  for (const [a, b] of HAND_BONES) {
     lCtx.beginPath();
     lCtx.moveTo(all[a].x, all[a].y);
     lCtx.lineTo(all[b].x, all[b].y);
-    lCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+    lCtx.strokeStyle = 'rgba(255,255,255,0.18)';
     lCtx.lineWidth = 1;
-    lCtx.shadowColor = 'rgba(150,240,255,0.3)';
-    lCtx.shadowBlur = 5;
+    lCtx.shadowColor = 'rgba(150,240,255,0.25)';
+    lCtx.shadowBlur = 4;
     lCtx.stroke();
   }
   lCtx.shadowBlur = 0;
 
   all.forEach((p, i) => {
-    const fi    = TIPS.indexOf(i);
+    const fi    = HAND_TIPS.indexOf(i);
     const isTip = fi >= 0;
-    const hue   = isTip ? C.hues[fi] : 160;
+    const hue   = isTip ? C.handHues[fi] : 160;
     const r     = isTip ? 7 : 2.5;
 
     lCtx.beginPath();
     lCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    lCtx.fillStyle = isTip ? `hsl(${hue}, 100%, 72%)` : 'rgba(255,255,255,0.45)';
+    lCtx.fillStyle = isTip ? `hsl(${hue}, 100%, 72%)` : 'rgba(255,255,255,0.4)';
     lCtx.shadowColor = isTip ? `hsl(${hue}, 100%, 65%)` : 'transparent';
     lCtx.shadowBlur = isTip ? C.glowBlur : 0;
     lCtx.fill();
@@ -259,66 +306,163 @@ function drawSkeleton(lm) {
       const pulse = 0.5 + 0.5 * Math.sin(tick * 2.5 + fi * 1.3);
       lCtx.beginPath();
       lCtx.arc(p.x, p.y, 11 + pulse * 6, 0, Math.PI * 2);
-      lCtx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.12 + pulse * 0.28})`;
+      lCtx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.1 + pulse * 0.25})`;
       lCtx.lineWidth = 1.2;
       lCtx.stroke();
     }
   });
 
-  return TIPS.map(ti => all[ti]);
+  return HAND_TIPS.map(ti => all[ti]);
+}
+
+// ── FACE MESH ─────────────────────────────────────────────────────────
+function drawFaceMesh(lm) {
+  // Convert all 468 landmarks to screen coords (mirrored)
+  const pts = lm.map(l => px(l, true));
+
+  // Draw contour lines for major features
+  const contours = [
+    { path: FACE_SILHOUETTE, hue: C.faceHue,  alpha: 0.25, w: 0.8 },
+    { path: FACE_LIPS_OUTER, hue: C.faceHue2, alpha: 0.5,  w: 1.2, close: true },
+    { path: FACE_LIPS_INNER, hue: C.faceHue2, alpha: 0.35, w: 0.8, close: true },
+    { path: FACE_LEFT_EYE,   hue: 190,        alpha: 0.6,  w: 1.0, close: true },
+    { path: FACE_RIGHT_EYE,  hue: 190,        alpha: 0.6,  w: 1.0, close: true },
+    { path: FACE_LEFT_BROW,  hue: C.faceHue,  alpha: 0.4,  w: 1.0 },
+    { path: FACE_RIGHT_BROW, hue: C.faceHue,  alpha: 0.4,  w: 1.0 },
+    { path: FACE_NOSE,       hue: C.faceHue2, alpha: 0.35, w: 0.8 },
+  ];
+
+  for (const ctr of contours) {
+    if (ctr.path.length < 2) continue;
+    const pulse = 0.5 + 0.5 * Math.sin(tick * 1.5 + ctr.hue * 0.01);
+
+    lCtx.beginPath();
+    lCtx.moveTo(pts[ctr.path[0]].x, pts[ctr.path[0]].y);
+    for (let i = 1; i < ctr.path.length; i++) {
+      lCtx.lineTo(pts[ctr.path[i]].x, pts[ctr.path[i]].y);
+    }
+    if (ctr.close) lCtx.closePath();
+
+    lCtx.strokeStyle = `hsla(${ctr.hue}, 90%, 70%, ${ctr.alpha * (0.7 + 0.3 * pulse)})`;
+    lCtx.lineWidth = ctr.w;
+    lCtx.shadowColor = `hsl(${ctr.hue}, 100%, 75%)`;
+    lCtx.shadowBlur = 6 + pulse * 8;
+    lCtx.stroke();
+    lCtx.shadowBlur = 0;
+  }
+
+  // Draw ALL 468 dots — tiny
+  lm.forEach((l, i) => {
+    const p = pts[i];
+    const isKey = FACE_KEY_PTS.includes(i);
+    const r = isKey ? 4 : 1.2;
+    const hue = isKey ? C.faceHue2 : C.faceHue;
+    const pulse = isKey ? (0.5 + 0.5 * Math.sin(tick * 3 + i)) : 1;
+
+    lCtx.beginPath();
+    lCtx.arc(p.x, p.y, r * (0.8 + 0.2 * pulse), 0, Math.PI * 2);
+    lCtx.fillStyle = `hsla(${hue}, 90%, 72%, ${isKey ? 0.9 : 0.45})`;
+    lCtx.shadowColor = `hsl(${hue}, 100%, 70%)`;
+    lCtx.shadowBlur = isKey ? 14 : 4;
+    lCtx.fill();
+    lCtx.shadowBlur = 0;
+  });
+
+  return pts;
 }
 
 // ── RENDER LOOP ───────────────────────────────────────────────────────
 function render() {
   tick += C.pulseSpd;
+  lCtx.clearRect(0, 0, W, H);
 
-  // Live canvas: fully cleared every frame (transparent = video shows through)
-  lCtx.clearRect(0, 0, liveC.width, liveC.height);
-
+  // Hand skeletons
   const curTips = [null, null];
   for (let h = 0; h < 2; h++) {
-    if (lastLandmarks[h]) curTips[h] = drawSkeleton(lastLandmarks[h]);
+    if (lastHandLM[h]) curTips[h] = drawHandSkeleton(lastHandLM[h]);
   }
-  drawWeb(curTips);
-  updateTrails(curTips);
 
-  prevTips = curTips.map(h => h ? [...h] : null);
+  // Face mesh
+  let curFacePts = null;
+  if (lastFaceLM) curFacePts = drawFaceMesh(lastFaceLM);
+
+  // Webs
+  drawHandWeb(curTips);
+  drawHandFaceWeb(curTips, curFacePts);
+
+  // Trails
+  updateTrails(curTips, curFacePts);
+
+  prevHandTips = curTips.map(h => h ? [...h] : null);
+  prevFacePts  = curFacePts ? [...curFacePts] : null;
+
   requestAnimationFrame(render);
 }
 
-// ── MEDIAPIPE ─────────────────────────────────────────────────────────
-function initMP() {
-  hands = new Hands({
+// ── MEDIAPIPE HANDS ───────────────────────────────────────────────────
+function initHands() {
+  handsModel = new Hands({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
   });
-  hands.setOptions({
+  handsModel.setOptions({
     maxNumHands: 2, modelComplexity: 1,
     minDetectionConfidence: 0.65, minTrackingConfidence: 0.55
   });
-  hands.onResults(r => {
-    lastLandmarks = [null, null];
+  handsModel.onResults(r => {
+    lastHandLM = [null, null];
     (r.multiHandLandmarks ?? []).forEach((lm, i) => {
-      lastLandmarks[r.multiHandedness?.[i]?.label === 'Left' ? 0 : 1] = lm;
+      lastHandLM[r.multiHandedness?.[i]?.label === 'Left' ? 0 : 1] = lm;
     });
-    const now = performance.now();
-    lastT = now;
   });
+  handsReady = true;
+  checkReady();
 }
 
+// ── MEDIAPIPE FACE MESH ───────────────────────────────────────────────
+function initFace() {
+  faceModel = new FaceMesh({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`
+  });
+  faceModel.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  faceModel.onResults(r => {
+    lastFaceLM = r.multiFaceLandmarks?.[0] ?? null;
+  });
+  faceReady = true;
+  checkReady();
+}
+
+function checkReady() {
+  if (handsReady && faceReady) status.textContent = 'Aktiv';
+}
+
+// Alternate sending frames to hands and face to avoid overload
+let frameCount = 0;
 async function processLoop() {
-  if (vid.readyState >= 2) await hands.send({ image: vid });
+  if (vid.readyState >= 2) {
+    if (frameCount % 2 === 0 && handsModel) await handsModel.send({ image: vid });
+    if (frameCount % 2 === 1 && faceModel)  await faceModel.send({ image: vid });
+    frameCount++;
+  }
   requestAnimationFrame(processLoop);
 }
 
+// ── BOOT ──────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById('start-screen').style.display = 'none';
+  status.textContent = 'Lade Modelle…';
   try {
     const s = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     vid.srcObject = s;
     await vid.play();
-    initMP();
+    initHands();
+    initFace();
     render();
     processLoop();
   } catch(e) {
@@ -327,8 +471,9 @@ async function boot() {
 }
 
 function clearTrails() {
-  tCtx.clearRect(0, 0, trailC.width, trailC.height);
-  prevTips = [null, null];
+  tCtx.clearRect(0, 0, W, H);
+  prevHandTips = [null, null];
+  prevFacePts  = null;
 }
 </script>
 
