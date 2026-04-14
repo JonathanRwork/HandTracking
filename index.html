@@ -20,13 +20,16 @@ touch-action: none;
 position: relative;
 width: 100vw;
 height: 100dvh;
+background: #000;
 }
 
 video {
 position: absolute;
-opacity: 0;
+inset: 0;
+width: 100%; height: 100%;
+object-fit: cover;
+transform: scaleX(-1);
 pointer-events: none;
-width: 1px; height: 1px;
 }
 
 /* Background canvas (trails/web) */
@@ -330,13 +333,10 @@ function render() {
   // Clear fg
   fgCtx.clearRect(0, 0, fgC.width, fgC.height);
 
-  // Fade bg (very slowly — trails persist)
-  bgCtx.fillStyle = 'rgba(0,0,0,0.018)';
-  bgCtx.fillRect(0, 0, bgC.width, bgC.height);
+  // Clear bg completely each frame (no fade, camera shows through)
+  bgCtx.clearRect(0, 0, bgC.width, bgC.height);
 
-  fadeTrails();
   fadeWebLines();
-  drawTrails();
   drawWebLines();
 
   // Draw skeletons + update trails
@@ -346,11 +346,6 @@ function render() {
   for (let h = 0; h < 2; h++) {
     if (!lms[h]) continue;
     pts[h] = drawSkeleton(lms[h], 0.85);
-
-    TIPS.forEach((ti, fi) => {
-      const p = pts[h][ti];
-      pushTrail(h, fi, p.x, p.y);
-    });
   }
 
   // Cross-hand web: same finger index
