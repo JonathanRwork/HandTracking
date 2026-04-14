@@ -158,8 +158,8 @@ function loadMask() {
       const maxDim = Math.max(size.x, size.y, size.z);
       maskGroup.scale.divideScalar(maxDim);
 
-      // Store original normalized size for reference
-      maskGroup.userData.normSize = size.clone().divideScalar(maxDim);
+      // Flip mask to face forward (model was exported facing wrong direction)
+      maskGroup.rotation.x = Math.PI; // flip upright
 
       // Wrap in pivot group for rotation control
       const pivot = new THREE.Group();
@@ -206,9 +206,12 @@ function updateMask(lm) {
   const leftEdge  = s(234);
   const rightEdge = s(454);
   const noseBridge = s(168); // stable center anchor
+  const foreheadPt = s(10);
 
-  // Position — center on nose bridge
-  pivot.position.set(noseBridge.x, noseBridge.y, 0);
+  // Position — between nose bridge and forehead for better centering
+  const anchorX = noseBridge.x;
+  const anchorY = noseBridge.y + (foreheadPt.y - noseBridge.y) * 0.3;
+  pivot.position.set(anchorX, anchorY, 0);
 
   // Scale — match face width & height
   const faceW = Math.hypot(rightEdge.x - leftEdge.x, rightEdge.y - leftEdge.y);
