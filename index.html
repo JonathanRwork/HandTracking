@@ -24,6 +24,10 @@ body { background:#000; overflow:hidden; touch-action:none; }
   position:absolute; inset:0; width:100%; height:100%;
   z-index:3; pointer-events:none;
 }
+#debug-canvas {
+  position:absolute; inset:0; width:100%; height:100%;
+  z-index:4; pointer-events:none;
+}
 #start-screen {
   position:fixed; inset:0; background:#000; z-index:20;
   display:flex; flex-direction:column;
@@ -63,6 +67,7 @@ body { background:#000; overflow:hidden; touch-action:none; }
   <video id="vid" playsinline autoplay muted></video>
   <canvas id="three-canvas"></canvas>
   <canvas id="hand-canvas"></canvas>
+  <canvas id="debug-canvas"></canvas>
 </div>
 
 <div id="start-screen">
@@ -158,8 +163,10 @@ function loadMask() {
       const maxDim = Math.max(size.x, size.y, size.z);
       maskGroup.scale.divideScalar(maxDim);
 
-      // Flip mask to face forward (model was exported facing wrong direction)
-      maskGroup.rotation.x = Math.PI; // flip upright
+      // Initial rotation — will be tuned via debug
+      maskGroup.rotation.x = 0;
+      maskGroup.rotation.y = 0;
+      maskGroup.rotation.z = 0;
 
       // Wrap in pivot group for rotation control
       const pivot = new THREE.Group();
@@ -189,10 +196,9 @@ let lastFaceLM = null;
 function updateMask(lm) {
   if (!modelReady || !window._maskPivot) return;
   const pivot = window._maskPivot;
-
   const W = window.innerWidth, H = window.innerHeight;
 
-  // Screen coords helper (mirrored X, Three.js Y-up)
+  // All coords: mirror X, flip Y for Three.js
   function s(i) {
     return {
       x:  (1 - lm[i].x) * W - W/2,
@@ -201,47 +207,47 @@ function updateMask(lm) {
     };
   }
 
-  const forehead  = s(10);
-  const chin      = s(152);
-  const leftEdge  = s(234);
-  const rightEdge = s(454);
-  const noseBridge = s(168); // stable center anchor
-  const foreheadPt = s(10);
+  // Key landmarks
+  const forehead   = s(10);   // top of head
+  const chin       = s(152);  // bottom of chin
+  const leftCheek  = s(234);  // left face edge
+  const rightCheek = s(454);  // right face edge
+  const noseTip    = s(4);    // nose tip
+  const noseBase   = s(168);  // nose bridge/root
 
-  // Position — between nose bridge and forehead for better centering
-  const anchorX = noseBridge.x;
-  const anchorY = noseBridge.y + (foreheadPt.y - noseBridge.y) * 0.3;
-  pivot.position.set(anchorX, anchorY, 0);
+  // ── POSITION: center of face between forehead and chin ──
+  const cx = (forehead.x + chin.x) / 2;
+  const cy = (forehead.y + chin.y) / 2;
+  pivot.position.set(cx, cy, 0);
 
-  // Scale — match face width & height
-  const faceW = Math.hypot(rightEdge.x - leftEdge.x, rightEdge.y - leftEdge.y);
+  // ── SCALE: match actual face size ──
   const faceH = Math.hypot(chin.x - forehead.x, chin.y - forehead.y);
-  const sc = Math.max(faceW, faceH) * 1.1; // uniform scale, slight oversize
-  pivot.scale.set(sc, sc, sc);
+  const faceW = Math.hypot(rightCheek.x - leftCheek.x, rightCheek.y - leftCheek.y);
+  const sc = Math.max(faceW, faceH) * 0.9;
+  pivot.scale.set(sc, sc, sc * 0.4);
 
-  // ── ROLL: head tilt left/right ──
-  // Vector from forehead(10) to chin(152) in raw landmark space
-  const rdx = -(lm[152].x - lm[10].x); // negate because X is mirrored
-  const rdy =  (lm[152].y - lm[10].y);
+  // ── ROLL: tilt of face (forehead→chin angle) ──
+  // Use raw (pre-mirror) landmarks for correct angle
+  const rdx = -(lm[152].x - lm[10].x); // mirrored X
+  const rdy =  (lm[152].y - lm[10].y); // Y (down positive)
   const roll = -Math.atan2(rdx, rdy);
 
-  // ── YAW: head turning left/right ──
-  // Nose x position normalized within face width
-  const noseX      = lm[1].x;
-  const leftChX    = lm[234].x;
-  const rightChX   = lm[454].x;
-  const faceWidthR = Math.abs(rightChX - leftChX);
-  if (faceWidthR < 0.01) return;
-  const noseNorm = (noseX - leftChX) / faceWidthR;
-  // noseNorm 0.5 = straight, <0.5 = turned to person's left (raw)
-  // After mirror: turned viewer-left → positive yaw
-  const yaw = (noseNorm - 0.5) * Math.PI * 1.5;
+  // ── YAW: left/right head turn ──
+  const noseX     = lm[1].x;
+  const lchX      = lm[234].x;
+  const rchX      = lm[454].x;
+  const fw        = Math.abs(rchX - lchX);
+  if (fw < 0.01) return;
+  const noseNorm  = (noseX - lchX) / fw;
+  const yaw       = (0.5 - noseNorm) * Math.PI * 1.5; // mirrored: flip sign
 
-  // ── PITCH: head nodding up/down ──
-  // z-depth difference: chin deeper than forehead when looking down
-  const pitch = (lm[152].z - lm[10].z) * 5.0;
+  // ── PITCH: nod up/down ──
+  const pitch = (lm[152].z - lm[10].z) * 4.0;
 
   pivot.rotation.set(pitch, yaw, roll);
+  pivot.visible = true;
+}
+
 }
 
 // ═══════════════════════════════════════════════════════
@@ -312,6 +318,37 @@ function drawHands() {
 }
 
 // ═══════════════════════════════════════════════════════
+// DEBUG OVERLAY
+// ═══════════════════════════════════════════════════════
+const dbgCanvas = document.getElementById('debug-canvas');
+const dbgCtx = dbgCanvas.getContext('2d');
+function resizeDbg() { dbgCanvas.width=window.innerWidth; dbgCanvas.height=window.innerHeight; }
+window.addEventListener('resize', resizeDbg); resizeDbg();
+
+function drawDebug() {
+  if (!lastFaceLM) { dbgCtx.clearRect(0,0,dbgCanvas.width,dbgCanvas.height); return; }
+  const W=dbgCanvas.width, H=dbgCanvas.height;
+  dbgCtx.clearRect(0,0,W,H);
+  const lm = lastFaceLM;
+  const pts = {
+    'Stirn(10)':   {i:10,  c:'#ff0'},
+    'Kinn(152)':   {i:152, c:'#0ff'},
+    'LWange(234)': {i:234, c:'#f0f'},
+    'RWange(454)': {i:454, c:'#f80'},
+    'Nase(1)':     {i:1,   c:'#0f0'},
+    'Mitte':       {x:(1-lm[10].x+1-lm[152].x)/2*W, y:(lm[10].y+lm[152].y)/2*H, c:'#fff', label:'Mitte'},
+  };
+  dbgCtx.font = 'bold 11px monospace';
+  for (const [label, p] of Object.entries(pts)) {
+    const x = p.x !== undefined ? p.x : (1-lm[p.i].x)*W;
+    const y = p.y !== undefined ? p.y : lm[p.i].y*H;
+    dbgCtx.beginPath(); dbgCtx.arc(x,y,8,0,Math.PI*2);
+    dbgCtx.fillStyle = p.c; dbgCtx.fill();
+    dbgCtx.fillStyle = '#000'; dbgCtx.fillText(label, x+10, y+4);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // RENDER LOOP
 // ═══════════════════════════════════════════════════════
 let fpsT=performance.now(), fpsN=0;
@@ -323,6 +360,7 @@ function animate() {
   else if (window._maskPivot) window._maskPivot.visible = false;
   if (lastFaceLM && window._maskPivot) window._maskPivot.visible = true;
   drawHands();
+  drawDebug();
   renderer.render(scene, camera);
   fpsN++;
   const now=performance.now();
