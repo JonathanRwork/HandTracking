@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>3D Mask</title>
+<title>3D Mask v3</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -12,88 +12,72 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#000; overflow:hidden; touch-action:none; }
 #container { position:fixed; inset:0; }
-#vid {
-  position:absolute; inset:0; width:100%; height:100%;
-  object-fit:cover; transform:scaleX(-1); z-index:1;
-}
-#three-canvas, #hand-canvas, #dbg-canvas {
-  position:absolute; inset:0; width:100%; height:100%;
-  pointer-events:none;
-}
+#vid { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); z-index:1; }
+#three-canvas, #hand-canvas, #dbg-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 #three-canvas { z-index:2; }
 #hand-canvas  { z-index:3; }
 #dbg-canvas   { z-index:4; }
 #start-screen {
   position:fixed; inset:0; background:#000; z-index:20;
-  display:flex; flex-direction:column;
-  align-items:center; justify-content:center; gap:14px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
   font-family:'Courier New',monospace;
 }
-#start-screen h1 {
-  font-size:clamp(2rem,9vw,4rem); font-weight:400;
-  letter-spacing:0.25em; color:#fff; text-transform:uppercase;
-  text-shadow:0 0 80px rgba(100,200,255,0.5);
-}
-#start-screen p { font-size:0.65rem; letter-spacing:0.15em; color:rgba(255,255,255,0.28); text-align:center; line-height:2; }
-#start-btn {
-  font-family:'Courier New',monospace; font-size:0.7rem; letter-spacing:0.3em;
-  text-transform:uppercase; color:#000; background:#fff; border:none;
-  padding:14px 42px; cursor:pointer; border-radius:2px; margin-top:6px;
-}
-#status { position:fixed; top:14px; left:18px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; letter-spacing:0.12em; color:rgba(255,255,255,0.35); }
-#fps    { position:fixed; top:14px; right:18px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; letter-spacing:0.12em; color:rgba(255,255,255,0.2); }
-#dbg-toggle { position:fixed; bottom:20px; right:20px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; letter-spacing:0.15em; text-transform:uppercase; color:rgba(255,255,255,0.25); background:transparent; border:1px solid rgba(255,255,255,0.12); padding:8px 14px; cursor:pointer; border-radius:2px; }
+#start-screen h1 { font-size:clamp(2rem,9vw,4rem); font-weight:400; letter-spacing:0.25em; color:#fff; text-transform:uppercase; text-shadow:0 0 80px rgba(100,200,255,0.5); }
+#start-screen p  { font-size:0.65rem; letter-spacing:0.15em; color:rgba(255,255,255,0.28); text-align:center; line-height:2; }
+#start-btn { font-family:'Courier New',monospace; font-size:0.7rem; letter-spacing:0.3em; text-transform:uppercase; color:#000; background:#fff; border:none; padding:14px 42px; cursor:pointer; border-radius:2px; margin-top:6px; }
+#status { position:fixed; top:14px; left:18px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; color:rgba(255,255,255,0.4); }
+#fps    { position:fixed; top:14px; right:18px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; color:rgba(255,255,255,0.25); }
+#dbg-btn { position:fixed; bottom:20px; right:20px; z-index:10; font-family:'Courier New',monospace; font-size:0.55rem; letter-spacing:0.15em; text-transform:uppercase; color:rgba(255,255,255,0.3); background:transparent; border:1px solid rgba(255,255,255,0.15); padding:8px 14px; cursor:pointer; border-radius:2px; }
 </style>
 </head>
 <body>
-
 <div id="container">
   <video id="vid" playsinline autoplay muted></video>
   <canvas id="three-canvas"></canvas>
   <canvas id="hand-canvas"></canvas>
   <canvas id="dbg-canvas"></canvas>
 </div>
-
 <div id="start-screen">
   <h1>3D Mask</h1>
   <p>Gesicht + Hände vor die Kamera.</p>
   <button id="start-btn" onclick="boot()">Starten</button>
 </div>
-
 <div id="status">Bereit</div>
 <div id="fps">FPS <span id="fv">—</span></div>
-<button id="dbg-toggle" onclick="toggleDbg()">Debug</button>
+<button id="dbg-btn" onclick="showDbg=!showDbg">Debug</button>
 
 <script>
-// ── THREE.JS SETUP ────────────────────────────────────────────
-const threeCanvas = document.getElementById('three-canvas');
-const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+// ── THREE.JS ──────────────────────────────────────────────────
+const threeC = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas: threeC, alpha: true, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.outputEncoding = THREE.sRGBEncoding;
 
 const scene = new THREE.Scene();
-const W0 = window.innerWidth, H0 = window.innerHeight;
-const camera = new THREE.OrthographicCamera(-W0/2, W0/2, H0/2, -H0/2, -2000, 2000);
+const camera = new THREE.OrthographicCamera(
+  -window.innerWidth/2, window.innerWidth/2,
+   window.innerHeight/2, -window.innerHeight/2, -2000, 2000
+);
 camera.position.z = 500;
 
 window.addEventListener('resize', () => {
-  const W = window.innerWidth, H = window.innerHeight;
-  renderer.setSize(W, H);
-  camera.left = -W/2; camera.right = W/2;
-  camera.top  =  H/2; camera.bottom = -H/2;
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.left   = -window.innerWidth/2;
+  camera.right   =  window.innerWidth/2;
+  camera.top     =  window.innerHeight/2;
+  camera.bottom  = -window.innerHeight/2;
   camera.updateProjectionMatrix();
 });
 
-// Lighting
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const key = new THREE.DirectionalLight(0xfff5e0, 1.3);
 key.position.set(0.5, 1, 2); scene.add(key);
 const fill = new THREE.DirectionalLight(0x8899ff, 0.4);
 fill.position.set(-1, -0.5, 1); scene.add(fill);
 
-// ── MASK LOADING ──────────────────────────────────────────────
+// ── MASK LOAD ─────────────────────────────────────────────────
 let pivot = null;
 let modelReady = false;
 
@@ -101,230 +85,198 @@ function loadGLTFLoader(cb) {
   const s = document.createElement('script');
   s.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
   s.onload = cb;
-  s.onerror = () => { document.getElementById('status').textContent = 'GLTFLoader Fehler'; };
+  s.onerror = () => setStatus('GLTFLoader Fehler');
   document.head.appendChild(s);
 }
 
+function setStatus(t) { document.getElementById('status').textContent = t; }
+
 function loadMask() {
-  document.getElementById('status').textContent = 'Lade Maske…';
+  setStatus('Lade Maske…');
   const loader = new THREE.GLTFLoader();
-  loader.load(
-    'Guyfawkes mask.glb',
+  loader.load('Guyfawkes mask.glb',
     (gltf) => {
       const model = gltf.scene;
-
-      // Normalize: center + scale to 1 unit
+      // Center + normalize to 1 unit
       const box = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      const center = new THREE.Vector3();
-      box.getSize(size);
-      box.getCenter(center);
-      model.position.sub(center);
-      const maxDim = Math.max(size.x, size.y, size.z);
-      model.scale.divideScalar(maxDim);
+      const c = new THREE.Vector3(), sz = new THREE.Vector3();
+      box.getCenter(c); box.getSize(sz);
+      model.position.sub(c);
+      model.scale.divideScalar(Math.max(sz.x, sz.y, sz.z));
 
-      // Pivot wraps model — we rotate pivot for face tracking,
-      // and model inside for initial orientation fix
       pivot = new THREE.Group();
       pivot.add(model);
       pivot.visible = false;
       scene.add(pivot);
-
-      // Store model ref for orientation debug
-      window._model = model;
-      window._pivot = pivot;
-
       modelReady = true;
-      document.getElementById('status').textContent = 'Bereit';
+      setStatus('');
     },
-    (p) => {
-      if (p.total) {
-        document.getElementById('status').textContent = 'Lade… ' + Math.round(p.loaded/p.total*100) + '%';
-      }
-    },
-    (err) => {
-      console.error(err);
-      document.getElementById('status').textContent = 'Maske nicht gefunden';
-    }
+    (p) => { if (p.total) setStatus('Lade… ' + Math.round(p.loaded/p.total*100) + '%'); },
+    (e) => { console.error(e); setStatus('Maske nicht gefunden — GLB fehlt'); }
   );
 }
 
-// ── FACE → MASK ────────────────────────────────────────────────
+// ── FACE TRACKING → MASK ──────────────────────────────────────
+// From the screenshot:
+// - Landmark 10  (Stirn):  ✅ correct — sits on forehead
+// - Landmark 234 (L-Wange): ✅ correct — left cheek
+// - Landmark 454 (R-Wange): ✅ correct — right cheek
+// - Landmark 175 (Kinn):   sits at mouth/chin — ok
+// - MITTE was correct horizontally, just too low vertically
+// - Mask was positioned between Stirn and Kinn → too low
+// Fix: anchor to nose bridge (168), scale from cheek width
+
 let lastFaceLM = null;
 
-// Tunable offsets — adjust these based on debug dots
-const TUNE = {
-  yOffset: 0.0,   // + = up, - = down (fraction of faceH)
-  rotX:    0.0,   // initial model pitch fix (radians)
-  rotY:    0.0,   // initial model yaw fix
-  rotZ:    0.0,   // initial model roll fix
-};
+function sc2(i) {
+  // Landmark → Three.js screen coords (center origin, Y up, X mirrored)
+  const lm = lastFaceLM;
+  const W = window.innerWidth, H = window.innerHeight;
+  return {
+    x:  (1 - lm[i].x) * W - W/2,
+    y: -(lm[i].y * H  - H/2),
+  };
+}
 
-function updateMask(lm) {
-  if (!modelReady || !pivot) return;
+function updateMask() {
+  if (!modelReady || !pivot || !lastFaceLM) return;
+  const lm = lastFaceLM;
   const W = window.innerWidth, H = window.innerHeight;
 
-  // Convert landmark to Three.js screen space
-  // Three.js: origin center, Y up, X right
-  function toScreen(i) {
-    return {
-      x:  (1 - lm[i].x) * W - W/2,   // mirror X
-      y: -(lm[i].y * H  - H/2),       // flip Y
-      z:  lm[i].z * -500              // depth
-    };
-  }
+  const forehead  = sc2(10);
+  const leftCheek = sc2(234);
+  const rightCheek= sc2(454);
+  const noseBridge= sc2(168);  // between eyes — center of face
+  const chin      = sc2(175);  // lower lip
 
-  // Use cheeks as vertical reference instead of chin (152 tracks too low)
-  const top    = toScreen(10);   // forehead
-  const left   = toScreen(234);  // left cheek
-  const right  = toScreen(454);  // right cheek
-  const chin   = toScreen(175);  // lower lip — much closer to actual chin on screen
-  const nose   = toScreen(1);    // nose tip — good center anchor
+  // Width between cheeks
+  const faceW = Math.hypot(rightCheek.x - leftCheek.x, rightCheek.y - leftCheek.y);
+  // Height from forehead to chin
+  const faceH = Math.hypot(forehead.x - chin.x, forehead.y - chin.y);
 
-  // Center on nose tip — most stable point
-  const cx = nose.x;
-  const cy = nose.y;
+  // ── POSITION: nose bridge is center of mask ──
+  pivot.position.set(noseBridge.x, noseBridge.y, 0);
 
-  // Face width from cheeks
-  const faceW = Math.hypot(right.x - left.x, right.y - left.y);
-  // Face height: forehead to lower lip
-  const faceH = Math.hypot(top.x - chin.x, top.y - chin.y);
+  // ── SCALE: based on face width ──
+  const sc = faceW * 1.05;
+  pivot.scale.set(sc, sc, sc * 0.3);
 
-  // Position — nose tip is roughly center of mask
-  pivot.position.set(cx, cy, 0);
+  // ── ROLL: tilt using raw landmark diff ──
+  // raw lm coords: x goes 0→1 left to right (not mirrored)
+  // after mirror: left in screen = high lm.x
+  const rdx = -(lm[175].x - lm[10].x);
+  const rdy =  (lm[175].y - lm[10].y);
+  const roll = -Math.atan2(rdx, rdy);
 
-  // Scale
-  const sc = faceW * 1.1;
-  pivot.scale.set(sc, sc, sc * 0.35);
+  // ── YAW: nose between cheeks ──
+  const noseX = lm[1].x;
+  const lchX  = lm[234].x;
+  const rchX  = lm[454].x;
+  const fw    = Math.abs(rchX - lchX);
+  const yaw   = fw < 0.01 ? 0 : (0.5 - (noseX - lchX) / fw) * Math.PI * 1.5;
 
-  // ── ROLL ──
-  const rawDX = -(lm[175].x - lm[10].x);
-  const rawDY =  (lm[175].y - lm[10].y);
-  const roll  = -Math.atan2(rawDX, rawDY);
-
-  // ── YAW ──
-  const nX  = lm[1].x;
-  const lX  = lm[234].x;
-  const rX  = lm[454].x;
-  const fw  = Math.abs(rX - lX);
-  const yaw = fw < 0.01 ? 0 : (0.5 - (nX - lX) / fw) * Math.PI * 1.5;
-
-  // ── PITCH ──
+  // ── PITCH: z depth diff ──
   const pitch = (lm[175].z - lm[10].z) * 4.0;
 
   pivot.rotation.set(pitch, yaw, roll);
   pivot.visible = true;
 }
 
-// ── DEBUG OVERLAY ──────────────────────────────────────────────
-const dbgCanvas = document.getElementById('dbg-canvas');
-const dCtx = dbgCanvas.getContext('2d');
+// ── DEBUG ─────────────────────────────────────────────────────
+const dbgC = document.getElementById('dbg-canvas');
+const dCtx = dbgC.getContext('2d');
 let showDbg = true;
-
-window.addEventListener('resize', () => {
-  dbgCanvas.width  = window.innerWidth;
-  dbgCanvas.height = window.innerHeight;
-});
-dbgCanvas.width  = window.innerWidth;
-dbgCanvas.height = window.innerHeight;
-
-function toggleDbg() { showDbg = !showDbg; }
+window.addEventListener('resize', () => { dbgC.width=window.innerWidth; dbgC.height=window.innerHeight; });
+dbgC.width = window.innerWidth; dbgC.height = window.innerHeight;
 
 function drawDebug() {
-  dCtx.clearRect(0, 0, dbgCanvas.width, dbgCanvas.height);
+  dCtx.clearRect(0, 0, dbgC.width, dbgC.height);
   if (!showDbg || !lastFaceLM) return;
   const lm = lastFaceLM;
-  const W = dbgCanvas.width, H = dbgCanvas.height;
+  const W = dbgC.width, H = dbgC.height;
 
-  // Show key landmarks as colored dots
   const pts = [
-    { i:10,  color:'#ffff00', label:'Stirn' },
-    { i:175, color:'#00ffff', label:'Kinn(175)' },
-    { i:234, color:'#ff00ff', label:'L-Wange' },
-    { i:454, color:'#ff8800', label:'R-Wange' },
-    { i:1,   color:'#00ff00', label:'Nase'  },
+    { i:10,  c:'#ff0', label:'10-Stirn'   },
+    { i:175, c:'#0ff', label:'175-Kinn'   },
+    { i:234, c:'#f0f', label:'234-LWange' },
+    { i:454, c:'#f80', label:'454-RWange' },
+    { i:168, c:'#0f0', label:'168-Nase'   },
+    { i:1,   c:'#fff', label:'1-NaseTip'  },
   ];
 
-  dCtx.font = 'bold 12px monospace';
+  dCtx.font = 'bold 11px monospace';
   for (const p of pts) {
     const x = (1 - lm[p.i].x) * W;
     const y = lm[p.i].y * H;
     dCtx.beginPath(); dCtx.arc(x, y, 7, 0, Math.PI*2);
-    dCtx.fillStyle = p.color; dCtx.fill();
-    dCtx.fillStyle = '#000'; dCtx.fillText(p.label, x+10, y+5);
+    dCtx.fillStyle = p.c; dCtx.fill();
+    dCtx.fillStyle = '#000'; dCtx.fillText(p.label, x+10, y+4);
   }
-
-  // Draw face center (where mask is positioned)
-  const cx = (1-lm[1].x) * W;
-  const cy = lm[1].y * H;
-  dCtx.beginPath(); dCtx.arc(cx, cy, 10, 0, Math.PI*2);
-  dCtx.strokeStyle = '#ffffff'; dCtx.lineWidth = 2; dCtx.stroke();
-  dCtx.fillStyle = '#fff'; dCtx.fillText('MITTE', cx+12, cy+5);
+  // Mask anchor = nose bridge 168
+  const ax = (1 - lm[168].x) * W;
+  const ay = lm[168].y * H;
+  dCtx.beginPath(); dCtx.arc(ax, ay, 12, 0, Math.PI*2);
+  dCtx.strokeStyle = '#fff'; dCtx.lineWidth = 2; dCtx.stroke();
+  dCtx.fillStyle='#fff'; dCtx.fillText('ANKER', ax+14, ay+4);
 }
 
-// ── HAND WEB ───────────────────────────────────────────────────
-const handCanvas = document.getElementById('hand-canvas');
-const hCtx = handCanvas.getContext('2d');
-window.addEventListener('resize', () => {
-  handCanvas.width  = window.innerWidth;
-  handCanvas.height = window.innerHeight;
-});
-handCanvas.width  = window.innerWidth;
-handCanvas.height = window.innerHeight;
+// ── HAND WEB ──────────────────────────────────────────────────
+const handC = document.getElementById('hand-canvas');
+const hCtx = handC.getContext('2d');
+window.addEventListener('resize', () => { handC.width=window.innerWidth; handC.height=window.innerHeight; });
+handC.width = window.innerWidth; handC.height = window.innerHeight;
 
-const HAND_HUES  = [200,155,125,95,60];
-const HAND_TIPS  = [4,8,12,16,20];
-const HAND_BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]];
+const HUES  = [200,155,125,95,60];
+const TIPS  = [4,8,12,16,20];
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17],[0,17]];
 let lastHandLM = [null,null];
 let tick = 0;
 
 function webLine(ax,ay,bx,by,hue,str) {
-  const p = 0.5 + 0.5*Math.sin(tick+ax*0.007);
+  const p=0.5+0.5*Math.sin(tick+ax*0.007);
   hCtx.beginPath(); hCtx.moveTo(ax,ay); hCtx.lineTo(bx,by);
-  hCtx.strokeStyle = `hsla(${hue},90%,70%,${str*(0.2+0.5*p)})`;
-  hCtx.lineWidth = 0.5+p*1.5;
-  hCtx.shadowColor = `hsl(${hue},100%,75%)`; hCtx.shadowBlur = 8+p*10;
-  hCtx.stroke(); hCtx.shadowBlur = 0;
+  hCtx.strokeStyle=`hsla(${hue},90%,70%,${str*(0.2+0.5*p)})`;
+  hCtx.lineWidth=0.5+p*1.5;
+  hCtx.shadowColor=`hsl(${hue},100%,75%)`; hCtx.shadowBlur=8+p*10;
+  hCtx.stroke(); hCtx.shadowBlur=0;
 }
 
 function drawHands() {
-  const W = handCanvas.width, H = handCanvas.height;
-  hCtx.clearRect(0,0,W,H);
-  hCtx.lineCap = 'round';
-  const tips = [null,null];
-  for (let h=0; h<2; h++) {
+  const W=handC.width, H=handC.height;
+  hCtx.clearRect(0,0,W,H); hCtx.lineCap='round';
+  const tips=[null,null];
+  for (let h=0;h<2;h++) {
     if (!lastHandLM[h]) continue;
-    const all = lastHandLM[h].map(l => ({x:(1-l.x)*W, y:l.y*H}));
+    const all=lastHandLM[h].map(l=>({x:(1-l.x)*W,y:l.y*H}));
     hCtx.strokeStyle='rgba(255,255,255,0.12)'; hCtx.lineWidth=1; hCtx.shadowBlur=0;
-    for (const [a,b] of HAND_BONES) { hCtx.beginPath(); hCtx.moveTo(all[a].x,all[a].y); hCtx.lineTo(all[b].x,all[b].y); hCtx.stroke(); }
-    all.forEach((p,i) => {
-      const fi=HAND_TIPS.indexOf(i), isTip=fi>=0, hue=isTip?HAND_HUES[fi]:160;
-      hCtx.beginPath(); hCtx.arc(p.x,p.y,isTip?6:2,0,Math.PI*2);
-      hCtx.fillStyle = isTip?`hsl(${hue},100%,70%)`:'rgba(255,255,255,0.3)';
+    for (const [a,b] of BONES){hCtx.beginPath();hCtx.moveTo(all[a].x,all[a].y);hCtx.lineTo(all[b].x,all[b].y);hCtx.stroke();}
+    all.forEach((p,i)=>{
+      const fi=TIPS.indexOf(i),isTip=fi>=0,hue=isTip?HUES[fi]:160;
+      hCtx.beginPath();hCtx.arc(p.x,p.y,isTip?6:2,0,Math.PI*2);
+      hCtx.fillStyle=isTip?`hsl(${hue},100%,70%)`:'rgba(255,255,255,0.3)';
       if(isTip){hCtx.shadowColor=`hsl(${hue},100%,65%)`;hCtx.shadowBlur=16;}
       hCtx.fill(); hCtx.shadowBlur=0;
     });
-    tips[h] = HAND_TIPS.map(ti=>all[ti]);
+    tips[h]=TIPS.map(ti=>all[ti]);
   }
   if(tips[0]&&tips[1]){
-    for(let fi=0;fi<5;fi++){const a=tips[0][fi],b=tips[1][fi],d=Math.hypot(a.x-b.x,a.y-b.y);if(d<700)webLine(a.x,a.y,b.x,b.y,HAND_HUES[fi],1-d/700);}
+    for(let fi=0;fi<5;fi++){const a=tips[0][fi],b=tips[1][fi],d=Math.hypot(a.x-b.x,a.y-b.y);if(d<700)webLine(a.x,a.y,b.x,b.y,HUES[fi],1-d/700);}
   }
   for(let h=0;h<2;h++){
-    if(!tips[h]) continue;
-    for(let fi=0;fi<5;fi++) for(let fj=fi+1;fj<5;fj++){
+    if(!tips[h])continue;
+    for(let fi=0;fi<5;fi++)for(let fj=fi+1;fj<5;fj++){
       const a=tips[h][fi],b=tips[h][fj],d=Math.hypot(a.x-b.x,a.y-b.y);
-      if(d<230)webLine(a.x,a.y,b.x,b.y,(HAND_HUES[fi]+HAND_HUES[fj])/2,(1-d/230)*0.75);
+      if(d<230)webLine(a.x,a.y,b.x,b.y,(HUES[fi]+HUES[fj])/2,(1-d/230)*0.75);
     }
   }
 }
 
-// ── RENDER LOOP ────────────────────────────────────────────────
+// ── RENDER LOOP ───────────────────────────────────────────────
 let fpsT=performance.now(), fpsN=0;
 function animate() {
-  tick += 0.07;
+  tick+=0.07;
   requestAnimationFrame(animate);
-  if (lastFaceLM) updateMask(lastFaceLM);
-  else if (pivot) pivot.visible = false;
+  updateMask();
   drawHands();
   drawDebug();
   renderer.render(scene, camera);
@@ -333,14 +285,14 @@ function animate() {
   if(now-fpsT>500){document.getElementById('fv').textContent=Math.round(fpsN*1000/(now-fpsT));fpsT=now;fpsN=0;}
 }
 
-// ── MEDIAPIPE ──────────────────────────────────────────────────
+// ── MEDIAPIPE ─────────────────────────────────────────────────
 const vid = document.getElementById('vid');
 
 function initFace() {
   const m = new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
   m.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
   m.onResults(r=>{ lastFaceLM = r.multiFaceLandmarks?.[0] ?? null; });
-  setInterval(async()=>{ if(vid.readyState>=2) await m.send({image:vid}); }, 50);
+  setInterval(async()=>{if(vid.readyState>=2) await m.send({image:vid});},50);
 }
 
 function initHands() {
@@ -348,20 +300,20 @@ function initHands() {
   m.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.6,minTrackingConfidence:0.5});
   m.onResults(r=>{
     lastHandLM=[null,null];
-    (r.multiHandLandmarks??[]).forEach((lm,i)=>{ lastHandLM[r.multiHandedness?.[i]?.label==='Left'?0:1]=lm; });
+    (r.multiHandLandmarks??[]).forEach((lm,i)=>{lastHandLM[r.multiHandedness?.[i]?.label==='Left'?0:1]=lm;});
   });
-  setInterval(async()=>{ if(vid.readyState>=2) await m.send({image:vid}); }, 33);
+  setInterval(async()=>{if(vid.readyState>=2) await m.send({image:vid});},33);
 }
 
 async function boot() {
   document.getElementById('start-screen').style.display='none';
   try {
-    const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
     vid.srcObject=s; await vid.play();
     loadGLTFLoader(loadMask);
     initFace(); initHands(); animate();
   } catch(e) {
-    alert('Kamera-Zugriff fehlgeschlagen:\n'+e.message+'\n\nBraucht localhost oder HTTPS.');
+    alert('Kamera-Zugriff fehlgeschlagen:\n'+e.message+'\n\nBraucht HTTPS.');
   }
 }
 </script>
