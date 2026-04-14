@@ -3,484 +3,444 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HAND TRACKER</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mediapipe/0.10.3/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Hand Web</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@800&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-–bg: #0a0a0f;
-–grid: rgba(255,255,255,0.03);
-–accent: #00ffcc;
-–accent2: #ff006e;
-–text: #e8e8f0;
-–dim: rgba(232,232,240,0.35);
-}
-
-html, body {
-width: 100%; height: 100%;
-background: var(–bg);
-color: var(–text);
-font-family: ‘Space Mono’, monospace;
+body {
+background: #000;
 overflow: hidden;
+font-family: ‘Courier New’, monospace;
+touch-action: none;
 }
 
-/* Grid background */
-body::before {
-content: ‘’;
-position: fixed; inset: 0;
-background-image:
-linear-gradient(var(–grid) 1px, transparent 1px),
-linear-gradient(90deg, var(–grid) 1px, transparent 1px);
-background-size: 40px 40px;
-pointer-events: none;
-z-index: 0;
-}
-
-#app {
+#container {
 position: relative;
-width: 100vw; height: 100vh;
-display: flex;
-flex-direction: column;
-align-items: center;
-justify-content: center;
-z-index: 1;
+width: 100vw;
+height: 100dvh;
 }
 
-/* Header */
-#header {
+video {
+position: absolute;
+opacity: 0;
+pointer-events: none;
+width: 1px; height: 1px;
+}
+
+/* Background canvas (trails/web) */
+#bg { position: absolute; inset: 0; }
+/* Foreground canvas (skeleton) */
+#fg { position: absolute; inset: 0; }
+
+/* UI */
+#ui {
 position: fixed;
 top: 0; left: 0; right: 0;
 display: flex;
-align-items: center;
 justify-content: space-between;
-padding: 20px 32px;
+align-items: flex-start;
+padding: 20px 24px;
+pointer-events: none;
 z-index: 10;
 }
 
-#logo {
-font-family: ‘Syne’, sans-serif;
-font-size: 1.1rem;
+#title {
+font-size: 0.65rem;
 letter-spacing: 0.3em;
-color: var(–accent);
+color: rgba(120,255,160,0.5);
 text-transform: uppercase;
 }
 
-#status {
-display: flex;
-align-items: center;
-gap: 8px;
-font-size: 0.7rem;
-letter-spacing: 0.15em;
-color: var(–dim);
-text-transform: uppercase;
+#info {
+font-size: 0.6rem;
+letter-spacing: 0.12em;
+color: rgba(120,255,160,0.3);
+text-align: right;
+line-height: 1.8;
 }
 
-#status-dot {
-width: 8px; height: 8px;
-border-radius: 50%;
-background: var(–dim);
-transition: background 0.3s;
-}
-#status-dot.active { background: var(–accent); box-shadow: 0 0 8px var(–accent); }
-#status-dot.error  { background: var(–accent2); box-shadow: 0 0 8px var(–accent2); }
-
-/* Canvas wrapper */
-#canvas-wrap {
-position: relative;
-width: min(90vw, 760px);
-aspect-ratio: 4/3;
-border: 1px solid rgba(255,255,255,0.08);
-border-radius: 4px;
-overflow: hidden;
-background: #050508;
-box-shadow: 0 0 60px rgba(0,255,204,0.04), inset 0 0 40px rgba(0,0,0,0.6);
-}
-
-/* Corner decorations */
-#canvas-wrap::before, #canvas-wrap::after {
-content: ‘’;
-position: absolute;
-width: 20px; height: 20px;
-border-color: var(–accent);
-border-style: solid;
-z-index: 5;
-}
-#canvas-wrap::before {
-top: -1px; left: -1px;
-border-width: 2px 0 0 2px;
-}
-#canvas-wrap::after {
-bottom: -1px; right: -1px;
-border-width: 0 2px 2px 0;
-}
-
-video#input_video {
-position: absolute;
-width: 100%; height: 100%;
-object-fit: cover;
-transform: scaleX(-1);
-opacity: 0;
-pointer-events: none;
-}
-
-canvas#output_canvas {
-position: absolute;
+#start-screen {
+position: fixed;
 inset: 0;
-width: 100%; height: 100%;
-}
-
-/* Overlay: start screen */
-#overlay {
-position: absolute;
-inset: 0;
+background: #000;
 display: flex;
 flex-direction: column;
 align-items: center;
 justify-content: center;
-gap: 16px;
-background: rgba(5,5,8,0.85);
-z-index: 6;
-transition: opacity 0.5s;
+gap: 20px;
+z-index: 20;
 }
-#overlay.hidden { opacity: 0; pointer-events: none; }
+
+#start-screen h1 {
+font-size: clamp(2rem, 8vw, 4rem);
+font-weight: 400;
+letter-spacing: 0.2em;
+color: rgba(120,255,160,0.9);
+text-transform: uppercase;
+}
+
+#start-screen p {
+font-size: 0.7rem;
+letter-spacing: 0.15em;
+color: rgba(120,255,160,0.35);
+text-align: center;
+max-width: 280px;
+line-height: 1.8;
+}
 
 #start-btn {
-font-family: ‘Space Mono’, monospace;
-font-size: 0.8rem;
-letter-spacing: 0.2em;
+margin-top: 12px;
+font-family: ‘Courier New’, monospace;
+font-size: 0.75rem;
+letter-spacing: 0.25em;
 text-transform: uppercase;
-color: var(–bg);
-background: var(–accent);
+color: #000;
+background: rgba(120,255,160,0.9);
 border: none;
-padding: 14px 36px;
+padding: 16px 40px;
 cursor: pointer;
 border-radius: 2px;
-transition: transform 0.15s, box-shadow 0.15s;
-}
-#start-btn:hover {
-transform: translateY(-2px);
-box-shadow: 0 8px 30px rgba(0,255,204,0.3);
 }
 
-#overlay p {
-font-size: 0.7rem;
-color: var(–dim);
-letter-spacing: 0.1em;
-}
-
-/* Stats panel */
-#stats {
+#clear-btn {
 position: fixed;
-bottom: 24px; left: 32px;
-display: flex;
-flex-direction: column;
-gap: 6px;
-z-index: 10;
-}
-
-.stat {
-font-size: 0.65rem;
-letter-spacing: 0.12em;
-color: var(–dim);
-text-transform: uppercase;
-}
-.stat span {
-color: var(–accent);
-font-weight: 700;
-}
-
-/* Finger labels */
-#fingers {
-position: fixed;
-bottom: 24px; right: 32px;
-display: flex;
-gap: 6px;
-z-index: 10;
-}
-
-.finger-pill {
+bottom: 24px;
+right: 24px;
+font-family: ‘Courier New’, monospace;
 font-size: 0.6rem;
-letter-spacing: 0.08em;
-padding: 4px 8px;
-border: 1px solid rgba(255,255,255,0.1);
-border-radius: 2px;
-color: var(–dim);
+letter-spacing: 0.2em;
 text-transform: uppercase;
-transition: border-color 0.2s, color 0.2s;
+color: rgba(120,255,160,0.4);
+background: transparent;
+border: 1px solid rgba(120,255,160,0.15);
+padding: 10px 18px;
+cursor: pointer;
+z-index: 10;
+border-radius: 2px;
+transition: color 0.2s, border-color 0.2s;
 }
-.finger-pill.up {
-border-color: var(–accent);
-color: var(–accent);
-}
-
-/* Scanline effect */
-#canvas-wrap::after {
-content: ‘’;
-position: absolute;
-inset: 0;
-background: repeating-linear-gradient(
-to bottom,
-transparent,
-transparent 2px,
-rgba(0,0,0,0.06) 2px,
-rgba(0,0,0,0.06) 4px
-);
-pointer-events: none;
-z-index: 4;
-border-width: 0 2px 2px 0;
-}
-
+#clear-btn:hover { color: rgba(120,255,160,0.9); border-color: rgba(120,255,160,0.5); }
 </style>
+
 </head>
 <body>
 
-<div id="app">
-  <header id="header">
-    <div id="logo">Hand·Tracker</div>
-    <div id="status">
-      <div id="status-dot"></div>
-      <span id="status-text">Bereit</span>
-    </div>
-  </header>
-
-  <div id="canvas-wrap">
-    <video id="input_video" playsinline></video>
-    <canvas id="output_canvas"></canvas>
-
-```
-<div id="overlay">
-  <p>Kamera-Zugriff erforderlich</p>
-  <button id="start-btn" onclick="startTracking()">Tracking starten</button>
-  <p>Läuft vollständig im Browser · Kein Server</p>
+<div id="container">
+  <video id="vid" playsinline></video>
+  <canvas id="bg"></canvas>
+  <canvas id="fg"></canvas>
 </div>
-```
 
-  </div>
-
-  <div id="stats">
-    <div class="stat">Hände erkannt: <span id="s-hands">0</span></div>
-    <div class="stat">Konfidenz: <span id="s-conf">—</span></div>
-    <div class="stat">FPS: <span id="s-fps">—</span></div>
-  </div>
-
-  <div id="fingers">
-    <div class="finger-pill" id="f0">Daumen</div>
-    <div class="finger-pill" id="f1">Zeige</div>
-    <div class="finger-pill" id="f2">Mittel</div>
-    <div class="finger-pill" id="f3">Ring</div>
-    <div class="finger-pill" id="f4">Klein</div>
+<div id="ui">
+  <div id="title">Hand Web</div>
+  <div id="info" id="info-box">
+    Hände: <span id="s-hands">0</span><br>
+    FPS: <span id="s-fps">—</span>
   </div>
 </div>
+
+<div id="start-screen">
+  <h1>Hand Web</h1>
+  <p>Bewege beide Hände vor der Kamera.<br>Gleiche Finger verbinden sich zu einem Netz.</p>
+  <button id="start-btn" onclick="start()">Starten</button>
+</div>
+
+<button id="clear-btn" onclick="clearWeb()">Netz löschen</button>
 
 <script>
-const video   = document.getElementById('input_video');
-const canvas  = document.getElementById('output_canvas');
-const ctx     = canvas.getContext('2d');
-const overlay = document.getElementById('overlay');
-const dot     = document.getElementById('status-dot');
-const stText  = document.getElementById('status-text');
+// ── Config ──────────────────────────────────────────────────────────
+const CFG = {
+  trailLen:    60,       // max points per finger trail
+  trailFade:   0.012,    // how fast old points fade
+  webMaxDist:  600,      // px — max dist to draw web line
+  pulseSpeed:  0.04,     // web pulse animation speed
+  dotR:        5,        // fingertip dot radius
+  glowBlur:    18,
+  // Per-finger hue (green-ish organic palette)
+  fingerHue:   [130, 150, 100, 80, 160],
+};
 
-let lastTime = 0, fps = 0;
-let currentHands = [];
+// ── State ───────────────────────────────────────────────────────────
+const vid    = document.getElementById('vid');
+const bgC    = document.getElementById('bg');
+const fgC    = document.getElementById('fg');
+const bgCtx  = bgC.getContext('2d');
+const fgCtx  = fgC.getContext('2d');
 
-// ── MediaPipe connection names ──────────────────────────────────────
-const CONNECTIONS = [
-  // Thumb
-  [0,1],[1,2],[2,3],[3,4],
-  // Index
-  [0,5],[5,6],[6,7],[7,8],
-  // Middle
-  [0,9],[9,10],[10,11],[11,12],
-  // Ring
-  [0,13],[13,14],[14,15],[15,16],
-  // Pinky
-  [0,17],[17,18],[18,19],[19,20],
-  // Palm
-  [5,9],[9,13],[13,17]
+// trails[handIdx][fingerIdx] = [{x,y,age}]
+let trails = [
+  [[], [], [], [], []],
+  [[], [], [], [], []]
 ];
 
-// Tip landmark indices per finger [thumb, index, middle, ring, pinky]
+// web segments: [{ax,ay,bx,by,age,phase}]
+let webLines = [];
+
+let hands, lastTime = 0, tick = 0;
+let lastLandmarks = [null, null]; // per hand
+
 const TIPS = [4, 8, 12, 16, 20];
-const PIPS = [2, 6, 10, 14, 18]; // for up detection
+const BONES = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],[0,17]
+];
 
-// ── Drawing ─────────────────────────────────────────────────────────
-function drawHand(landmarks, handedness) {
-  const w = canvas.width, h = canvas.height;
-  const isLeft = handedness === 'Left';
-  const color  = isLeft ? '#00ffcc' : '#ff006e';
-  const colorFade = isLeft ? 'rgba(0,255,204,0.15)' : 'rgba(255,0,110,0.15)';
+// ── Resize ───────────────────────────────────────────────────────────
+function resize() {
+  bgC.width = fgC.width = window.innerWidth;
+  bgC.height = fgC.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
 
-  // Convert normalized to pixel
-  const pts = landmarks.map(l => ({
-    x: (1 - l.x) * w,
-    y: l.y * h,
-    z: l.z
-  }));
+// ── Coordinate mapping ───────────────────────────────────────────────
+function lmToScreen(lm) {
+  return {
+    x: (1 - lm.x) * bgC.width,
+    y: lm.y * bgC.height
+  };
+}
 
-  // Draw bones
-  ctx.lineWidth = 1.5;
-  for (const [a, b] of CONNECTIONS) {
-    const grad = ctx.createLinearGradient(pts[a].x, pts[a].y, pts[b].x, pts[b].y);
-    grad.addColorStop(0, color + 'cc');
-    grad.addColorStop(1, color + '44');
-    ctx.strokeStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(pts[a].x, pts[a].y);
-    ctx.lineTo(pts[b].x, pts[b].y);
-    ctx.stroke();
+// ── Trail management ─────────────────────────────────────────────────
+function pushTrail(handIdx, fingerIdx, x, y) {
+  const t = trails[handIdx][fingerIdx];
+  t.push({ x, y, age: 1.0 });
+  if (t.length > CFG.trailLen) t.shift();
+}
+
+function fadeTrails() {
+  for (let h = 0; h < 2; h++) {
+    for (let f = 0; f < 5; f++) {
+      const t = trails[h][f];
+      for (let i = t.length - 1; i >= 0; i--) {
+        t[i].age -= CFG.trailFade;
+        if (t[i].age <= 0) t.splice(i, 1);
+      }
+    }
+  }
+}
+
+// ── Web line management ───────────────────────────────────────────────
+function addWebLine(ax, ay, bx, by) {
+  webLines.push({ ax, ay, bx, by, age: 1.0, phase: Math.random() * Math.PI * 2 });
+  // cap total lines
+  if (webLines.length > 300) webLines.shift();
+}
+
+function fadeWebLines() {
+  for (let i = webLines.length - 1; i >= 0; i--) {
+    webLines[i].age -= 0.003;
+    if (webLines[i].age <= 0) webLines.splice(i, 1);
+  }
+}
+
+// ── Draw trails ───────────────────────────────────────────────────────
+function drawTrails() {
+  for (let h = 0; h < 2; h++) {
+    for (let f = 0; f < 5; f++) {
+      const t = trails[h][f];
+      if (t.length < 2) continue;
+      const hue = CFG.fingerHue[f];
+
+      for (let i = 1; i < t.length; i++) {
+        const a = t[i-1], b = t[i];
+        const alpha = Math.min(a.age, b.age) * 0.6;
+        bgCtx.beginPath();
+        bgCtx.moveTo(a.x, a.y);
+        bgCtx.lineTo(b.x, b.y);
+        bgCtx.strokeStyle = `hsla(${hue}, 80%, 65%, ${alpha})`;
+        bgCtx.lineWidth = Math.min(a.age, b.age) * 2.5;
+        bgCtx.stroke();
+      }
+    }
+  }
+}
+
+// ── Draw web lines ────────────────────────────────────────────────────
+function drawWebLines() {
+  tick += CFG.pulseSpeed;
+  for (const l of webLines) {
+    const pulse = 0.5 + 0.5 * Math.sin(tick + l.phase);
+    const alpha = l.age * (0.15 + 0.2 * pulse);
+    const hue   = 130;
+
+    // Main line
+    bgCtx.beginPath();
+    bgCtx.moveTo(l.ax, l.ay);
+    bgCtx.lineTo(l.bx, l.by);
+    bgCtx.strokeStyle = `hsla(${hue}, 70%, 60%, ${alpha})`;
+    bgCtx.lineWidth = 0.8 + pulse * 0.6;
+    bgCtx.shadowColor = `hsla(${hue}, 90%, 70%, ${alpha * 0.8})`;
+    bgCtx.shadowBlur = 6 + pulse * 8;
+    bgCtx.stroke();
+    bgCtx.shadowBlur = 0;
+  }
+}
+
+// ── Draw skeleton ─────────────────────────────────────────────────────
+function drawSkeleton(lm, alpha) {
+  const pts = lm.map(l => lmToScreen(l));
+
+  // Bones
+  for (const [a, b] of BONES) {
+    fgCtx.beginPath();
+    fgCtx.moveTo(pts[a].x, pts[a].y);
+    fgCtx.lineTo(pts[b].x, pts[b].y);
+    fgCtx.strokeStyle = `rgba(120,255,160,${alpha * 0.25})`;
+    fgCtx.lineWidth = 1;
+    fgCtx.stroke();
   }
 
-  // Draw joints
-  pts.forEach((p, i) => {
-    const isTip = TIPS.includes(i);
-    const r = isTip ? 5 : 3;
+  // Tips
+  TIPS.forEach((ti, fi) => {
+    const p = pts[ti];
+    const hue = CFG.fingerHue[fi];
 
-    // Glow
-    ctx.shadowColor = color;
-    ctx.shadowBlur  = isTip ? 14 : 6;
+    fgCtx.shadowColor = `hsl(${hue}, 90%, 70%)`;
+    fgCtx.shadowBlur  = CFG.glowBlur;
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = isTip ? color : color + 'aa';
-    ctx.fill();
+    fgCtx.beginPath();
+    fgCtx.arc(p.x, p.y, CFG.dotR, 0, Math.PI * 2);
+    fgCtx.fillStyle = `hsla(${hue}, 80%, 75%, ${alpha})`;
+    fgCtx.fill();
 
-    ctx.shadowBlur = 0;
-
-    // Ring for tips
-    if (isTip) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
-      ctx.strokeStyle = color + '55';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
+    fgCtx.shadowBlur = 0;
   });
 
-  // Wrist label
-  const wrist = pts[0];
-  ctx.font = '600 10px "Space Mono", monospace';
-  ctx.fillStyle = color + 'cc';
-  ctx.letterSpacing = '2px';
-  ctx.fillText(isLeft ? 'L' : 'R', wrist.x + 10, wrist.y);
+  // Joint dots
+  pts.forEach((p, i) => {
+    if (TIPS.includes(i)) return;
+    fgCtx.beginPath();
+    fgCtx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    fgCtx.fillStyle = `rgba(120,255,160,${alpha * 0.4})`;
+    fgCtx.fill();
+  });
 
   return pts;
 }
 
-function updateFingerUI(landmarks) {
-  if (!landmarks || landmarks.length === 0) {
-    TIPS.forEach((_, i) => document.getElementById('f'+i).classList.remove('up'));
-    return;
+// ── Main render loop ──────────────────────────────────────────────────
+function render() {
+  // Clear fg
+  fgCtx.clearRect(0, 0, fgC.width, fgC.height);
+
+  // Fade bg (very slowly — trails persist)
+  bgCtx.fillStyle = 'rgba(0,0,0,0.018)';
+  bgCtx.fillRect(0, 0, bgC.width, bgC.height);
+
+  fadeTrails();
+  fadeWebLines();
+  drawTrails();
+  drawWebLines();
+
+  // Draw skeletons + update trails
+  const lms = lastLandmarks;
+  const pts = [null, null];
+
+  for (let h = 0; h < 2; h++) {
+    if (!lms[h]) continue;
+    pts[h] = drawSkeleton(lms[h], 0.85);
+
+    TIPS.forEach((ti, fi) => {
+      const p = pts[h][ti];
+      pushTrail(h, fi, p.x, p.y);
+    });
   }
-  const l = landmarks;
-  // Thumb: tip.x < ip.x (mirrored)
-  const thumbUp = (1 - l[4].x) < (1 - l[3].x);
-  // Other fingers: tip.y < pip.y
-  const fingersUp = [
-    thumbUp,
-    l[8].y < l[6].y,
-    l[12].y < l[10].y,
-    l[16].y < l[14].y,
-    l[20].y < l[18].y
-  ];
-  fingersUp.forEach((up, i) => {
-    document.getElementById('f'+i).classList.toggle('up', up);
-  });
+
+  // Cross-hand web: same finger index
+  if (pts[0] && pts[1]) {
+    TIPS.forEach((ti, fi) => {
+      const a = pts[0][ti], b = pts[1][ti];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist < CFG.webMaxDist) {
+        addWebLine(a.x, a.y, b.x, b.y);
+      }
+    });
+  }
+
+  // Single hand: connect all fingertips to each other (web)
+  for (let h = 0; h < 2; h++) {
+    if (!pts[h]) continue;
+    for (let fi = 0; fi < TIPS.length; fi++) {
+      for (let fj = fi + 1; fj < TIPS.length; fj++) {
+        const a = pts[h][TIPS[fi]], b = pts[h][TIPS[fj]];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (dist < 200) {
+          addWebLine(a.x, a.y, b.x, b.y);
+        }
+      }
+    }
+  }
+
+  requestAnimationFrame(render);
 }
 
-// ── Hands setup ─────────────────────────────────────────────────────
-let hands;
-
-function initMediaPipe() {
+// ── MediaPipe ────────────────────────────────────────────────────────
+function initMP() {
   hands = new Hands({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
   });
-
   hands.setOptions({
     maxNumHands: 2,
     modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.6
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.55
   });
-
   hands.onResults(onResults);
 }
 
-function onResults(results) {
-  // Resize canvas to video
-  canvas.width  = video.videoWidth  || 640;
-  canvas.height = video.videoHeight || 480;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Subtle video background
-  ctx.save();
-  ctx.globalAlpha = 0.08;
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  const n = results.multiHandLandmarks?.length ?? 0;
+function onResults(r) {
+  const n = r.multiHandLandmarks?.length ?? 0;
   document.getElementById('s-hands').textContent = n;
 
+  lastLandmarks = [null, null];
+
   if (n > 0) {
-    dot.className = 'active';
-    stText.textContent = n === 1 ? '1 Hand' : '2 Hände';
-
-    results.multiHandLandmarks.forEach((lm, i) => {
-      const side = results.multiHandedness?.[i]?.label ?? 'Right';
-      drawHand(lm, side);
+    r.multiHandLandmarks.forEach((lm, i) => {
+      // MediaPipe returns 'Left'/'Right' from camera perspective (already mirrored in draw)
+      const side = r.multiHandedness?.[i]?.label;
+      const idx  = side === 'Left' ? 0 : 1;
+      lastLandmarks[idx] = lm;
     });
-
-    const conf = results.multiHandedness?.[0]?.score ?? 0;
-    document.getElementById('s-conf').textContent = (conf * 100).toFixed(0) + '%';
-    updateFingerUI(results.multiHandLandmarks[0]);
-  } else {
-    dot.className = '';
-    stText.textContent = 'Keine Hand';
-    document.getElementById('s-conf').textContent = '—';
-    updateFingerUI(null);
   }
 
-  // FPS
   const now = performance.now();
-  fps = Math.round(1000 / (now - lastTime));
+  document.getElementById('s-fps').textContent = Math.round(1000 / (now - lastTime));
   lastTime = now;
-  document.getElementById('s-fps').textContent = fps;
 }
 
-// ── Start ────────────────────────────────────────────────────────────
-async function startTracking() {
-  overlay.classList.add('hidden');
-  dot.className = '';
-  stText.textContent = 'Initialisiere…';
+async function processLoop() {
+  if (vid.readyState >= 2) await hands.send({ image: vid });
+  requestAnimationFrame(processLoop);
+}
 
+// ── Start ─────────────────────────────────────────────────────────────
+async function start() {
+  document.getElementById('start-screen').style.display = 'none';
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 720 } });
-    video.srcObject = stream;
-    await video.play();
-
-    initMediaPipe();
-
-    const processFrame = async () => {
-      if (video.readyState >= 2) {
-        await hands.send({ image: video });
-      }
-      requestAnimationFrame(processFrame);
-    };
-
-    requestAnimationFrame(processFrame);
-    stText.textContent = 'Aktiv';
-
-  } catch (e) {
-    dot.className = 'error';
-    stText.textContent = 'Kein Kamera-Zugriff';
-    overlay.classList.remove('hidden');
-    overlay.querySelector('p').textContent = 'Kamera-Zugriff verweigert: ' + e.message;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    vid.srcObject = stream;
+    await vid.play();
+    initMP();
+    render();
+    processLoop();
+  } catch(e) {
+    alert('Kamera-Zugriff fehlgeschlagen:\n' + e.message + '\n\nÖffne die Seite über localhost oder HTTPS.');
   }
+}
+
+function clearWeb() {
+  webLines = [];
+  trails = [[[], [], [], [], []], [[], [], [], [], []]];
+  bgCtx.clearRect(0, 0, bgC.width, bgC.height);
 }
 </script>
 
