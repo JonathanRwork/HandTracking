@@ -8,181 +8,109 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; touch-action: none; font-family: 'Courier New', monospace; }
 
-body {
-background: #000;
-overflow: hidden;
-font-family: ‘Courier New’, monospace;
-touch-action: none;
-}
-
-#container {
-position: relative;
-width: 100vw;
-height: 100dvh;
-background: #000;
-}
+#container { position: relative; width: 100vw; height: 100dvh; }
 
 video {
-position: absolute;
-inset: 0;
+position: absolute; inset: 0;
 width: 100%; height: 100%;
 object-fit: cover;
 transform: scaleX(-1);
 pointer-events: none;
 }
 
-/* Background canvas (trails/web) */
-#bg { position: absolute; inset: 0; }
-/* Foreground canvas (skeleton) */
-#fg { position: absolute; inset: 0; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-/* UI */
+#vignette {
+position: absolute; inset: 0;
+background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.6) 100%);
+pointer-events: none; z-index: 2;
+}
+
 #ui {
-position: fixed;
-top: 0; left: 0; right: 0;
-display: flex;
-justify-content: space-between;
-align-items: flex-start;
-padding: 20px 24px;
-pointer-events: none;
-z-index: 10;
+position: fixed; top: 0; left: 0; right: 0;
+display: flex; justify-content: space-between; align-items: center;
+padding: 18px 24px;
+pointer-events: none; z-index: 10;
 }
-
-#title {
-font-size: 0.65rem;
-letter-spacing: 0.3em;
-color: rgba(120,255,160,0.5);
-text-transform: uppercase;
-}
-
-#info {
-font-size: 0.6rem;
-letter-spacing: 0.12em;
-color: rgba(120,255,160,0.3);
-text-align: right;
-line-height: 1.8;
-}
+#title { font-size: 0.6rem; letter-spacing: 0.35em; color: rgba(255,255,255,0.2); text-transform: uppercase; }
+#fps-box { font-size: 0.55rem; letter-spacing: 0.15em; color: rgba(255,255,255,0.15); }
 
 #start-screen {
-position: fixed;
-inset: 0;
-background: #000;
-display: flex;
-flex-direction: column;
-align-items: center;
-justify-content: center;
-gap: 20px;
-z-index: 20;
+position: fixed; inset: 0; background: #000;
+display: flex; flex-direction: column;
+align-items: center; justify-content: center; gap: 16px; z-index: 20;
 }
-
 #start-screen h1 {
-font-size: clamp(2rem, 8vw, 4rem);
-font-weight: 400;
-letter-spacing: 0.2em;
-color: rgba(120,255,160,0.9);
-text-transform: uppercase;
+font-size: clamp(2.5rem, 10vw, 5rem);
+font-weight: 400; letter-spacing: 0.25em; color: #fff; text-transform: uppercase;
+text-shadow: 0 0 80px rgba(100,220,255,0.5);
 }
-
 #start-screen p {
-font-size: 0.7rem;
-letter-spacing: 0.15em;
-color: rgba(120,255,160,0.35);
-text-align: center;
-max-width: 280px;
-line-height: 1.8;
+font-size: 0.65rem; letter-spacing: 0.18em;
+color: rgba(255,255,255,0.28); text-align: center; line-height: 2; max-width: 300px;
 }
-
 #start-btn {
-margin-top: 12px;
-font-family: ‘Courier New’, monospace;
-font-size: 0.75rem;
-letter-spacing: 0.25em;
-text-transform: uppercase;
-color: #000;
-background: rgba(120,255,160,0.9);
-border: none;
-padding: 16px 40px;
-cursor: pointer;
-border-radius: 2px;
+margin-top: 8px; font-family: ‘Courier New’, monospace;
+font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase;
+color: #000; background: #fff; border: none;
+padding: 15px 44px; cursor: pointer; border-radius: 2px;
 }
-
 #clear-btn {
-position: fixed;
-bottom: 24px;
-right: 24px;
+position: fixed; bottom: 22px; right: 22px;
 font-family: ‘Courier New’, monospace;
-font-size: 0.6rem;
-letter-spacing: 0.2em;
-text-transform: uppercase;
-color: rgba(120,255,160,0.4);
-background: transparent;
-border: 1px solid rgba(120,255,160,0.15);
-padding: 10px 18px;
-cursor: pointer;
-z-index: 10;
-border-radius: 2px;
+font-size: 0.55rem; letter-spacing: 0.2em; text-transform: uppercase;
+color: rgba(255,255,255,0.2); background: transparent;
+border: 1px solid rgba(255,255,255,0.1);
+padding: 9px 16px; cursor: pointer; border-radius: 2px; z-index: 10;
 transition: color 0.2s, border-color 0.2s;
 }
-#clear-btn:hover { color: rgba(120,255,160,0.9); border-color: rgba(120,255,160,0.5); }
+#clear-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.4); }
 </style>
 
 </head>
 <body>
-
 <div id="container">
   <video id="vid" playsinline></video>
-  <canvas id="bg"></canvas>
-  <canvas id="fg"></canvas>
+  <canvas id="trail"></canvas>
+  <canvas id="live"></canvas>
+  <div id="vignette"></div>
 </div>
 
 <div id="ui">
-  <div id="title">Hand Web</div>
-  <div id="info" id="info-box">
-    Hände: <span id="s-hands">0</span><br>
-    FPS: <span id="s-fps">—</span>
-  </div>
+  <div id="title">Hand · Web</div>
+  <div id="fps-box">FPS <span id="s-fps">—</span></div>
 </div>
 
 <div id="start-screen">
   <h1>Hand Web</h1>
-  <p>Bewege beide Hände vor der Kamera.<br>Gleiche Finger verbinden sich zu einem Netz.</p>
-  <button id="start-btn" onclick="start()">Starten</button>
+  <p>Beide Hände vor die Kamera.<br>Finger spinnen ein leuchtendes Netz.</p>
+  <button id="start-btn" onclick="boot()">Starten</button>
 </div>
 
-<button id="clear-btn" onclick="clearWeb()">Netz löschen</button>
+<button id="clear-btn" onclick="clearAll()">Löschen</button>
 
 <script>
-// ── Config ──────────────────────────────────────────────────────────
-const CFG = {
-  trailLen:    60,       // max points per finger trail
-  trailFade:   0.012,    // how fast old points fade
-  webMaxDist:  600,      // px — max dist to draw web line
-  pulseSpeed:  0.04,     // web pulse animation speed
-  dotR:        5,        // fingertip dot radius
-  glowBlur:    18,
-  // Per-finger hue (green-ish organic palette)
-  fingerHue:   [130, 150, 100, 80, 160],
+const C = {
+  fadeAlpha:  0.20,   // höher = schnelleres verblassen
+  trailWidth: 5,
+  webMaxDist: 700,
+  innerDist:  230,
+  pulseSpd:   0.07,
+  glowBlur:   24,
+  hues: [200, 155, 125, 95, 60], // Daumen→Kleiner: Blau, Cyan, Grün, Gelbgrün, Gelb
 };
 
-// ── State ───────────────────────────────────────────────────────────
 const vid    = document.getElementById('vid');
-const bgC    = document.getElementById('bg');
-const fgC    = document.getElementById('fg');
-const bgCtx  = bgC.getContext('2d');
-const fgCtx  = fgC.getContext('2d');
+const trailC = document.getElementById('trail');
+const liveC  = document.getElementById('live');
+const tCtx   = trailC.getContext('2d');
+const lCtx   = liveC.getContext('2d');
 
-// trails[handIdx][fingerIdx] = [{x,y,age}]
-let trails = [
-  [[], [], [], [], []],
-  [[], [], [], [], []]
-];
-
-// web segments: [{ax,ay,bx,by,age,phase}]
-let webLines = [];
-
-let hands, lastTime = 0, tick = 0;
-let lastLandmarks = [null, null]; // per hand
+let hands, tick = 0, lastT = 0;
+let lastLandmarks = [null, null];
+let prevTips = [null, null];
 
 const TIPS = [4, 8, 12, 16, 20];
 const BONES = [
@@ -194,220 +122,196 @@ const BONES = [
   [5,9],[9,13],[13,17],[0,17]
 ];
 
-// ── Resize ───────────────────────────────────────────────────────────
 function resize() {
-  bgC.width = fgC.width = window.innerWidth;
-  bgC.height = fgC.height = window.innerHeight;
+  trailC.width = liveC.width = window.innerWidth;
+  trailC.height = liveC.height = window.innerHeight;
 }
 window.addEventListener('resize', resize);
 resize();
 
-// ── Coordinate mapping ───────────────────────────────────────────────
-function lmToScreen(lm) {
-  return {
-    x: (1 - lm.x) * bgC.width,
-    y: lm.y * bgC.height
-  };
+function px(lm) {
+  return { x: (1 - lm.x) * liveC.width, y: lm.y * liveC.height };
 }
 
-// ── Trail management ─────────────────────────────────────────────────
-function pushTrail(handIdx, fingerIdx, x, y) {
-  const t = trails[handIdx][fingerIdx];
-  t.push({ x, y, age: 1.0 });
-  if (t.length > CFG.trailLen) t.shift();
-}
-
-function fadeTrails() {
-  for (let h = 0; h < 2; h++) {
-    for (let f = 0; f < 5; f++) {
-      const t = trails[h][f];
-      for (let i = t.length - 1; i >= 0; i--) {
-        t[i].age -= CFG.trailFade;
-        if (t[i].age <= 0) t.splice(i, 1);
-      }
-    }
-  }
-}
-
-// ── Web line management ───────────────────────────────────────────────
-function addWebLine(ax, ay, bx, by) {
-  webLines.push({ ax, ay, bx, by, age: 1.0, phase: Math.random() * Math.PI * 2 });
-  // cap total lines
-  if (webLines.length > 300) webLines.shift();
-}
-
-function fadeWebLines() {
-  for (let i = webLines.length - 1; i >= 0; i--) {
-    webLines[i].age -= 0.003;
-    if (webLines[i].age <= 0) webLines.splice(i, 1);
-  }
-}
-
-// ── Draw trails ───────────────────────────────────────────────────────
-function drawTrails() {
-  for (let h = 0; h < 2; h++) {
-    for (let f = 0; f < 5; f++) {
-      const t = trails[h][f];
-      if (t.length < 2) continue;
-      const hue = CFG.fingerHue[f];
-
-      for (let i = 1; i < t.length; i++) {
-        const a = t[i-1], b = t[i];
-        const alpha = Math.min(a.age, b.age) * 0.6;
-        bgCtx.beginPath();
-        bgCtx.moveTo(a.x, a.y);
-        bgCtx.lineTo(b.x, b.y);
-        bgCtx.strokeStyle = `hsla(${hue}, 80%, 65%, ${alpha})`;
-        bgCtx.lineWidth = Math.min(a.age, b.age) * 2.5;
-        bgCtx.stroke();
-      }
-    }
-  }
-}
-
-// ── Draw web lines ────────────────────────────────────────────────────
-function drawWebLines() {
-  tick += CFG.pulseSpeed;
-  for (const l of webLines) {
-    const pulse = 0.5 + 0.5 * Math.sin(tick + l.phase);
-    const alpha = l.age * (0.15 + 0.2 * pulse);
-    const hue   = 130;
-
-    // Main line
-    bgCtx.beginPath();
-    bgCtx.moveTo(l.ax, l.ay);
-    bgCtx.lineTo(l.bx, l.by);
-    bgCtx.strokeStyle = `hsla(${hue}, 70%, 60%, ${alpha})`;
-    bgCtx.lineWidth = 0.8 + pulse * 0.6;
-    bgCtx.shadowColor = `hsla(${hue}, 90%, 70%, ${alpha * 0.8})`;
-    bgCtx.shadowBlur = 6 + pulse * 8;
-    bgCtx.stroke();
-    bgCtx.shadowBlur = 0;
-  }
-}
-
-// ── Draw skeleton ─────────────────────────────────────────────────────
-function drawSkeleton(lm, alpha) {
-  const pts = lm.map(l => lmToScreen(l));
-
-  // Bones
-  for (const [a, b] of BONES) {
-    fgCtx.beginPath();
-    fgCtx.moveTo(pts[a].x, pts[a].y);
-    fgCtx.lineTo(pts[b].x, pts[b].y);
-    fgCtx.strokeStyle = `rgba(120,255,160,${alpha * 0.25})`;
-    fgCtx.lineWidth = 1;
-    fgCtx.stroke();
-  }
-
-  // Tips
-  TIPS.forEach((ti, fi) => {
-    const p = pts[ti];
-    const hue = CFG.fingerHue[fi];
-
-    fgCtx.shadowColor = `hsl(${hue}, 90%, 70%)`;
-    fgCtx.shadowBlur  = CFG.glowBlur;
-
-    fgCtx.beginPath();
-    fgCtx.arc(p.x, p.y, CFG.dotR, 0, Math.PI * 2);
-    fgCtx.fillStyle = `hsla(${hue}, 80%, 75%, ${alpha})`;
-    fgCtx.fill();
-
-    fgCtx.shadowBlur = 0;
-  });
-
-  // Joint dots
-  pts.forEach((p, i) => {
-    if (TIPS.includes(i)) return;
-    fgCtx.beginPath();
-    fgCtx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-    fgCtx.fillStyle = `rgba(120,255,160,${alpha * 0.4})`;
-    fgCtx.fill();
-  });
-
-  return pts;
-}
-
-// ── Main render loop ──────────────────────────────────────────────────
-function render() {
-  // Clear fg
-  fgCtx.clearRect(0, 0, fgC.width, fgC.height);
-
-  // Clear bg completely each frame (no fade, camera shows through)
-  bgCtx.clearRect(0, 0, bgC.width, bgC.height);
-
-  fadeWebLines();
-  drawWebLines();
-
-  // Draw skeletons + update trails
-  const lms = lastLandmarks;
-  const pts = [null, null];
+// ── TRAILS ──────────────────────────────────────────────────────────
+function drawTrails(cur) {
+  // Fast fade: semi-opaque black layer
+  tCtx.fillStyle = `rgba(0,0,0,${C.fadeAlpha})`;
+  tCtx.fillRect(0, 0, trailC.width, trailC.height);
 
   for (let h = 0; h < 2; h++) {
-    if (!lms[h]) continue;
-    pts[h] = drawSkeleton(lms[h], 0.85);
-  }
+    if (!cur[h] || !prevTips[h]) continue;
+    TIPS.forEach((_, fi) => {
+      const a = prevTips[h][fi], b = cur[h][fi];
+      if (!a || !b) return;
+      const hue = C.hues[fi];
 
-  // Cross-hand web: same finger index
-  if (pts[0] && pts[1]) {
-    TIPS.forEach((ti, fi) => {
-      const a = pts[0][ti], b = pts[1][ti];
-      const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      if (dist < CFG.webMaxDist) {
-        addWebLine(a.x, a.y, b.x, b.y);
-      }
+      // Fat glow trail
+      tCtx.beginPath();
+      tCtx.moveTo(a.x, a.y);
+      tCtx.lineTo(b.x, b.y);
+      tCtx.strokeStyle = `hsla(${hue}, 100%, 65%, 0.95)`;
+      tCtx.lineWidth = C.trailWidth;
+      tCtx.lineCap = 'round';
+      tCtx.shadowColor = `hsl(${hue}, 100%, 70%)`;
+      tCtx.shadowBlur = 18;
+      tCtx.stroke();
+
+      // Bright core
+      tCtx.beginPath();
+      tCtx.moveTo(a.x, a.y);
+      tCtx.lineTo(b.x, b.y);
+      tCtx.strokeStyle = `hsla(${hue}, 60%, 92%, 0.7)`;
+      tCtx.lineWidth = 1.5;
+      tCtx.shadowBlur = 0;
+      tCtx.stroke();
+    });
+  }
+}
+
+// ── WEB ─────────────────────────────────────────────────────────────
+function webLine(ax, ay, bx, by, hue, strength) {
+  const pulse = 0.5 + 0.5 * Math.sin(tick + ax * 0.008 + ay * 0.006);
+  const alpha = strength * (0.25 + 0.55 * pulse);
+  const w     = 0.5 + pulse * 1.8;
+
+  // Outer glow
+  lCtx.beginPath();
+  lCtx.moveTo(ax, ay);
+  lCtx.lineTo(bx, by);
+  lCtx.strokeStyle = `hsla(${hue}, 90%, 65%, ${alpha * 0.5})`;
+  lCtx.lineWidth = w + 3;
+  lCtx.shadowColor = `hsl(${hue}, 100%, 75%)`;
+  lCtx.shadowBlur = 12 + pulse * 16;
+  lCtx.stroke();
+
+  // Core line
+  lCtx.beginPath();
+  lCtx.moveTo(ax, ay);
+  lCtx.lineTo(bx, by);
+  lCtx.strokeStyle = `hsla(${hue}, 85%, 78%, ${alpha})`;
+  lCtx.lineWidth = w;
+  lCtx.shadowBlur = 0;
+  lCtx.stroke();
+}
+
+function drawWeb(tips) {
+  lCtx.lineCap = 'round';
+
+  // Cross-hand: same finger
+  if (tips[0] && tips[1]) {
+    TIPS.forEach((_, fi) => {
+      const a = tips[0][fi], b = tips[1][fi];
+      if (!a || !b) return;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < C.webMaxDist) webLine(a.x, a.y, b.x, b.y, C.hues[fi], 1 - d / C.webMaxDist);
     });
   }
 
-  // Single hand: connect all fingertips to each other (web)
+  // Within each hand
   for (let h = 0; h < 2; h++) {
-    if (!pts[h]) continue;
-    for (let fi = 0; fi < TIPS.length; fi++) {
-      for (let fj = fi + 1; fj < TIPS.length; fj++) {
-        const a = pts[h][TIPS[fi]], b = pts[h][TIPS[fj]];
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        if (dist < 200) {
-          addWebLine(a.x, a.y, b.x, b.y);
+    if (!tips[h]) continue;
+    for (let fi = 0; fi < 5; fi++) {
+      for (let fj = fi + 1; fj < 5; fj++) {
+        const a = tips[h][fi], b = tips[h][fj];
+        if (!a || !b) continue;
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (d < C.innerDist) {
+          const hue = (C.hues[fi] + C.hues[fj]) / 2;
+          webLine(a.x, a.y, b.x, b.y, hue, (1 - d / C.innerDist) * 0.75);
         }
       }
     }
   }
+}
 
+// ── SKELETON ─────────────────────────────────────────────────────────
+function drawSkeleton(lm) {
+  const all = lm.map(l => px(l));
+
+  // Bones
+  for (const [a, b] of BONES) {
+    lCtx.beginPath();
+    lCtx.moveTo(all[a].x, all[a].y);
+    lCtx.lineTo(all[b].x, all[b].y);
+    lCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+    lCtx.lineWidth = 1;
+    lCtx.shadowColor = 'rgba(150,240,255,0.35)';
+    lCtx.shadowBlur = 5;
+    lCtx.stroke();
+  }
+  lCtx.shadowBlur = 0;
+
+  // Joints + tips
+  all.forEach((p, i) => {
+    const fi = TIPS.indexOf(i);
+    const isTip = fi >= 0;
+    const hue = isTip ? C.hues[fi] : 160;
+    const r   = isTip ? 7 : 2.5;
+
+    // Glow
+    lCtx.beginPath();
+    lCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    lCtx.fillStyle = isTip ? `hsl(${hue}, 100%, 72%)` : 'rgba(255,255,255,0.45)';
+    lCtx.shadowColor = isTip ? `hsl(${hue}, 100%, 65%)` : 'transparent';
+    lCtx.shadowBlur = isTip ? C.glowBlur : 0;
+    lCtx.fill();
+    lCtx.shadowBlur = 0;
+
+    // Pulsing ring on tips
+    if (isTip) {
+      const pulse = 0.5 + 0.5 * Math.sin(tick * 2.5 + fi * 1.3);
+      lCtx.beginPath();
+      lCtx.arc(p.x, p.y, 11 + pulse * 6, 0, Math.PI * 2);
+      lCtx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.12 + pulse * 0.28})`;
+      lCtx.lineWidth = 1.2;
+      lCtx.stroke();
+
+      // Second ring
+      lCtx.beginPath();
+      lCtx.arc(p.x, p.y, 18 + pulse * 4, 0, Math.PI * 2);
+      lCtx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.05 + pulse * 0.1})`;
+      lCtx.lineWidth = 0.8;
+      lCtx.stroke();
+    }
+  });
+
+  return TIPS.map(ti => all[ti]);
+}
+
+// ── RENDER LOOP ───────────────────────────────────────────────────────
+function render() {
+  tick += C.pulseSpd;
+  lCtx.clearRect(0, 0, liveC.width, liveC.height);
+
+  const curTips = [null, null];
+  for (let h = 0; h < 2; h++) {
+    if (lastLandmarks[h]) curTips[h] = drawSkeleton(lastLandmarks[h]);
+  }
+
+  drawWeb(curTips);
+  drawTrails(curTips);
+
+  prevTips = curTips.map(h => h ? [...h] : null);
   requestAnimationFrame(render);
 }
 
-// ── MediaPipe ────────────────────────────────────────────────────────
+// ── MEDIAPIPE ─────────────────────────────────────────────────────────
 function initMP() {
   hands = new Hands({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
   });
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.65,
-    minTrackingConfidence: 0.55
-  });
-  hands.onResults(onResults);
-}
-
-function onResults(r) {
-  const n = r.multiHandLandmarks?.length ?? 0;
-  document.getElementById('s-hands').textContent = n;
-
-  lastLandmarks = [null, null];
-
-  if (n > 0) {
-    r.multiHandLandmarks.forEach((lm, i) => {
-      // MediaPipe returns 'Left'/'Right' from camera perspective (already mirrored in draw)
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.65, minTrackingConfidence: 0.55 });
+  hands.onResults(r => {
+    lastLandmarks = [null, null];
+    (r.multiHandLandmarks ?? []).forEach((lm, i) => {
       const side = r.multiHandedness?.[i]?.label;
-      const idx  = side === 'Left' ? 0 : 1;
-      lastLandmarks[idx] = lm;
+      lastLandmarks[side === 'Left' ? 0 : 1] = lm;
     });
-  }
-
-  const now = performance.now();
-  document.getElementById('s-fps').textContent = Math.round(1000 / (now - lastTime));
-  lastTime = now;
+    const now = performance.now();
+    document.getElementById('s-fps').textContent = Math.round(1000 / (now - lastT));
+    lastT = now;
+  });
 }
 
 async function processLoop() {
@@ -415,27 +319,25 @@ async function processLoop() {
   requestAnimationFrame(processLoop);
 }
 
-// ── Start ─────────────────────────────────────────────────────────────
-async function start() {
+async function boot() {
   document.getElementById('start-screen').style.display = 'none';
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const s = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
-    vid.srcObject = stream;
+    vid.srcObject = s;
     await vid.play();
     initMP();
     render();
     processLoop();
   } catch(e) {
-    alert('Kamera-Zugriff fehlgeschlagen:\n' + e.message + '\n\nÖffne die Seite über localhost oder HTTPS.');
+    alert('Kamera-Zugriff fehlgeschlagen:\n' + e.message + '\n\nBraucht localhost oder HTTPS.');
   }
 }
 
-function clearWeb() {
-  webLines = [];
-  trails = [[[], [], [], [], []], [[], [], [], [], []]];
-  bgCtx.clearRect(0, 0, bgC.width, bgC.height);
+function clearAll() {
+  tCtx.clearRect(0, 0, trailC.width, trailC.height);
+  prevTips = [null, null];
 }
 </script>
 
